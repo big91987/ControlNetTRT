@@ -39,7 +39,7 @@ class hackathon():
         print(dir(self.model))
         print('!!!!!!!!!!!!!!!!!!!!!!!!!')
 
-        if not os.path.isfile("./onnx/sd_control_fp16.engine"):
+        if not os.path.isfile("./engine/sd_control_fp16.engine"):
             x_in = torch.randn(1, 4, H//8, W //8, dtype=torch.float32).to("cuda")
             h_in = torch.randn(1, 3, H, W, dtype=torch.float32).to("cuda")
             t_in = torch.zeros(1, dtype=torch.int64).to("cuda")
@@ -61,7 +61,7 @@ class hackathon():
 
             torch.onnx.export(control_model,               
                                 (x_in, h_in, t_in, c_in),  
-                                "./ooox/sd_control_test.onnx",   
+                                "./onnx/sd_control_test.onnx",   
                                 export_params=True,
                                 opset_version=16,
                                 do_constant_folding=True,
@@ -70,7 +70,7 @@ class hackathon():
                                 output_names = output_names, 
                                 dynamic_axes = dynamic_table)
             
-            os.system("trtexec --onnx=onnx/sd_control_test.onnx --saveEngine=sd_control_fp16.engine --fp16 --optShapes=x_in:1x4x32x48,h_in:1x3x256x384,t_in:1,c_in:1x77x768")
+            os.system("trtexec --onnx=./onnx/sd_control_test.onnx --saveEngine=./engine/sd_control_fp16.engine --fp16 --optShapes=x_in:1x4x32x48,h_in:1x3x256x384,t_in:1,c_in:1x77x768")
 
         with open("./engine/sd_control_fp16.engine", 'rb') as f:
             engine_str = f.read()

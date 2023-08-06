@@ -314,8 +314,8 @@ class ControlLDM(LatentDiffusion):
         self.only_mid_control = only_mid_control
         self.control_scales = [1.0] * 13
 
-        print('control_stage_config ===> {control_stage_config}')
-        print('control_key ===> {control_key}')
+        # print('control_stage_config ===> {control_stage_config}')
+        # print('control_key ===> {control_key}')
 
 
     @torch.no_grad()
@@ -332,11 +332,11 @@ class ControlLDM(LatentDiffusion):
     def apply_model(self, x_noisy, t, cond, *args, **kwargs):
         assert isinstance(cond, dict)
 
-        print('cond ===> {cond}')
+        # print('cond ===> {cond}')
         diffusion_model = self.model.diffusion_model
 
         cond_txt = torch.cat(cond['c_crossattn'], 1)
-        print(cond)
+        # print(cond)
         if cond['c_concat'] is None:
             eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, only_mid_control=self.only_mid_control)
         else:

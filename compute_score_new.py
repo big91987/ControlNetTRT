@@ -7,9 +7,6 @@ import datetime
 
 from canny2image_TRT_new import hackathon
 
-
-prefix = '/root/works/trt2023hack'
-
 block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
 model = InceptionV3([block_idx]).to("cuda")
 
@@ -26,7 +23,7 @@ latencys = []
 hk = hackathon()
 hk.initialize()
 for i in range(20):
-    path = f"{prefix}/pictures_croped/bird_"+ str(i) + ".jpg"
+    path = f"/home/player/pictures_croped/bird_"+ str(i) + ".jpg"
     img = cv2.imread(path)
     start = datetime.datetime.now().timestamp()
     new_img = hk.process(img,
@@ -45,7 +42,7 @@ for i in range(20):
             200)
     end = datetime.datetime.now().timestamp()
     print("time cost is: ", (end-start)*1000)
-    new_path = "./bird_"+ str(i) + ".jpg"
+    new_path = "./output/bird_"+ str(i) + ".jpg"
     cv2.imwrite(new_path, new_img[0])
     # generate the base_img by running the pytorch fp32 pipeline (origin code in canny2image_TRT.py)
     # base_path = "base_img.jpg"
