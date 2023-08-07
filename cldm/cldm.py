@@ -329,6 +329,89 @@ class ControlLDM(LatentDiffusion):
         control = control.to(memory_format=torch.contiguous_format).float()
         return x, dict(c_crossattn=[c], c_concat=[control])
 
+
+
+    def apply_unet(self, x_noisy, t, cond, control = None):
+        
+        
+        # eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, only_mid_control=self.only_mid_control)
+
+        cond_txt = torch.cat(cond['c_crossattn'], 1)
+
+        b, c, h, w = x_noisy.shape
+
+        buffer_device = []
+        buffer_device.append(x_noisy.reshape(-1).data_ptr())
+        # buffer_device.append(hint_in.reshape(-1).data_ptr())
+        buffer_device.append(t.reshape(-1).data_ptr())
+        buffer_device.append(cond_txt.reshape(-1).data_ptr())
+
+        if control:
+            for i in range(13):
+                buffer_device.append(control[i].reshape(-1).data_ptr())
+
+        unet_out = []
+        temp = torch.zeros(b, c, h, w, dtype=torch.float32).to('cuda')
+        unet_out.append(temp)
+        buffer_device.append(temp.reshape(-1).data_ptr())
+
+        ## 执行推理
+        self.unet_context.execute_v2(buffer_device)
+
+        return unet_out[0]
+    
+
+    def apply_control(self, x_noisy, t, cond):
+
+        # control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt)
+        cond_txt = torch.cat(cond['c_crossattn'], 1)
+        hint_in = torch.cat(cond['c_concat'], 1)
+
+        b, c, h, w = x_noisy.shape
+
+        buffer_device = []
+        buffer_device.append(x_noisy.reshape(-1).data_ptr())
+        buffer_device.append(hint_in.reshape(-1).data_ptr())
+        buffer_device.append(t.reshape(-1).data_ptr())
+        buffer_device.append(cond_txt.reshape(-1).data_ptr())
+
+        control_out = []
+
+        for i in range(3):
+            temp = torch.zeros(b, 320, h, w, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+            buffer_device.append(temp.reshape(-1).data_ptr())
+        
+        temp = torch.zeros(b, 320, h//2, w//2, dtype=torch.float32).to("cuda")
+        control_out.append(temp)
+        buffer_device.append(temp.reshape(-1).data_ptr())
+
+        for i in range(2):
+            temp = torch.zeros(b, 640, h//2, w//2, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+            buffer_device.append(temp.reshape(-1).data_ptr())
+
+        ## out_bufer
+        temp = torch.zeros(b, 640, h//4, w//4, dtype=torch.float32).to("cuda")
+        control_out.append(temp)
+        buffer_device.append(temp.reshape(-1).data_ptr())
+
+        for i in range(2):
+            temp = torch.zeros(b, 1280, h//4, w//4, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+            buffer_device.append(temp.reshape(-1).data_ptr())
+
+        for i in range(4):
+            temp = torch.zeros(b, 1280, h//8, w//8, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+            buffer_device.append(temp.reshape(-1).data_ptr())
+
+        ## 执行推理
+        self.control_context.execute_v2(buffer_device)
+
+        return [c * scale for c, scale in zip(control_out, self.control_scales)]
+
+
     def apply_model(self, x_noisy, t, cond, *args, **kwargs):
         assert isinstance(cond, dict)
 
@@ -387,7 +470,11 @@ class ControlLDM(LatentDiffusion):
 
             ## 获取结果
             control = [c * scale for c, scale in zip(control_out, self.control_scales)]
-            eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, only_mid_control=self.only_mid_control)
+            # eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, only_mid_control=self.only_mid_control)
+            eps = self.apply_unet(x_noisy, t, cond, control)
+
+            # import pdb; pdb.set_trace();
+            # eps = self.apply_unet(x_noisy, t, cond, control)
 
         return eps
 
