@@ -17,6 +17,66 @@ from cldm.model import create_model, load_state_dict
 from cldm.ddim_hacked import DDIMSampler
 from ldm.util import log_txt_as_img, exists, instantiate_from_config
 
+
+
+def make_context(engine_path, model_name, trt_logger):
+    H = 256
+    W = 384
+    assert os.path.exists(engine_path)
+    latent_height = H // 8
+    latent_width  = W // 8
+    latent_channel  = 4
+    img_hegint = H
+    img_width = W
+    img_channel = 3
+    embedding_dim = 768
+    text_maxlen = 77
+    batch_size = 1
+
+    if model_name == 'control':
+        input_shapes = {
+            'x_in' : [batch_size, latent_channel, latent_height, latent_width],
+            'h_in' : [batch_size, img_channel, img_hegint, img_width], 
+            't_in' : [batch_size], 
+            'c_in' : [batch_size, text_maxlen, embedding_dim],
+        }
+
+    elif model_name == 'unet':
+
+        input_shapes = {
+            'x_in' : [batch_size, latent_channel, latent_height, latent_width], 
+            't_in' : [batch_size], 
+            'c_in' : [batch_size, text_maxlen, embedding_dim], 
+            'ctrl0': [batch_size, 320, latent_height, latent_width],
+            'ctrl1': [batch_size, 320, latent_height, latent_width],
+            'ctrl2': [batch_size, 320, latent_height, latent_width],
+            'ctrl3': [batch_size, 320, latent_height//2, latent_width//2],
+            'ctrl4': [batch_size, 640, latent_height//2, latent_width//2],
+            'ctrl5': [batch_size, 640, latent_height//2, latent_width//2],
+            'ctrl6': [batch_size, 640, latent_height//4, latent_width//4],
+            'ctrl7': [batch_size, 1280, latent_height//4, latent_width//4],
+            'ctrl8': [batch_size, 1280, latent_height//4, latent_width//4],
+            'ctrl9': [batch_size, 1280, latent_height//8, latent_width//8],
+            'ctrl10': [batch_size, 1280, latent_height//8, latent_width//8],
+            'ctrl11': [batch_size, 1280, latent_height//8, latent_width//8],
+            'ctrl12': [batch_size, 1280, latent_height//8, latent_width//8],
+        }
+    else:
+        return None
+
+    with open(engine_path, 'rb') as f:
+        engine_str = f.read()
+
+    engine = trt.Runtime(trt_logger).deserialize_cuda_engine(engine_str)
+    context = engine.create_execution_context()
+    
+    for i, input_name in enumerate(input_shapes.keys()):
+        context.set_binding_shape(i, input_shapes[input_name])
+    
+    return context
+
+
+
 class hackathon():
 
     def initialize(self):
@@ -32,63 +92,31 @@ class hackathon():
         H = 256
         W = 384
 
-        control_model = self.model.control_model
+        control_onnx = './onnx/control/model.onnx'
+        control_plan = './engine/control.engine'
 
-        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        print(type(self.model))
-        print(dir(self.model))
-        print('!!!!!!!!!!!!!!!!!!!!!!!!!')
 
-        if not os.path.isfile("./engine/sd_control_fp16.engine"):
-            x_in = torch.randn(1, 4, H//8, W //8, dtype=torch.float32).to("cuda")
-            h_in = torch.randn(1, 3, H, W, dtype=torch.float32).to("cuda")
-            t_in = torch.zeros(1, dtype=torch.int64).to("cuda")
-            c_in = torch.randn(1, 77, 768, dtype=torch.float32).to("cuda")
+        clip_onnx = './onnx/clip/model.onnx'
+        clip_plan = './engine/clip.engine'
 
-            controls = control_model(x=x_in, hint=h_in, timesteps=t_in, context=c_in)
+        vae_onnx = './onnx/vae/model.onnx'
+        vae_plan = './engine/vae.engine'
 
-            output_names = []
-            for i in range(13):
-                output_names.append("out_"+ str(i))
+        unet_onnx = './onnx/unet/model.onnx'
+        unet_plan = './engine/unet.engine'
 
-            dynamic_table = {'x_in' : {0 : 'bs', 2 : 'H', 3 : 'W'}, 
-                                'h_in' : {0 : 'bs', 2 : '8H', 3 : '8W'}, 
-                                't_in' : {0 : 'bs'},
-                                'c_in' : {0 : 'bs'}}
-            
-            for i in range(13):
-                dynamic_table[output_names[i]] = {0 : "bs"}
+        self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
 
-            torch.onnx.export(control_model,               
-                                (x_in, h_in, t_in, c_in),  
-                                "./onnx/sd_control_test.onnx",   
-                                export_params=True,
-                                opset_version=16,
-                                do_constant_folding=True,
-                                keep_initializers_as_inputs=True,
-                                input_names = ['x_in', "h_in", "t_in", "c_in"], 
-                                output_names = output_names, 
-                                dynamic_axes = dynamic_table)
-            
-            os.system("trtexec --onnx=./onnx/sd_control_test.onnx --saveEngine=./engine/sd_control_fp16.engine --fp16 --optShapes=x_in:1x4x32x48,h_in:1x3x256x384,t_in:1,c_in:1x77x768")
+        self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
-        with open("./engine/sd_control_fp16.engine", 'rb') as f:
-            engine_str = f.read()
-
-        control_engine = trt.Runtime(self.trt_logger).deserialize_cuda_engine(engine_str)
-        control_context = control_engine.create_execution_context()
-
-        control_context.set_binding_shape(0, (1, 4, H // 8, W // 8))
-        control_context.set_binding_shape(1, (1, 3, H, W))
-        control_context.set_binding_shape(2, (1,))
-        control_context.set_binding_shape(3, (1, 77, 768))
-        self.model.control_context = control_context
 
         print("finished")
 
 
 
     def process(self, input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, low_threshold, high_threshold):
+        
+        # ddim_steps = 10
         with torch.no_grad():
             img = resize_image(HWC3(input_image), image_resolution)
             H, W, C = img.shape
