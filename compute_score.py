@@ -44,6 +44,6 @@ for i in range(20):
     cv2.imwrite(new_path, new_img[0])
     # generate the base_img by running the pytorch fp32 pipeline (origin code in canny2image_TRT.py)
     # base_path = "base_img.jpg"
-    # score = PD(base_path, new_path)
-    # print("score is: ", score)
+    score = PD(path, new_path)
+    print("score is: ", score)
 
