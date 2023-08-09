@@ -115,44 +115,50 @@ def make_cuda_graph(engine_path, model_name, trt_logger):
     _, stream = cudart.cudaStreamCreate()
 
     # Initialize buffers using PyTorch tensors on CUDA
-    bufferH = []
+    buffer = []
     for i, i_shape in enumerate(input_shapes):
         i_dtype = torch_dtype_from_trt(input_dtypes[i])
         i_shape = tuple(i_shape)
-        if i_dtype.is_floating_point:
-            i_data = torch.rand(*i_shape, dtype=i_dtype, device='cuda')
-        else:
-            i_data = torch.randint(low=0, high=100, size=i_shape, dtype=i_dtype, device='cuda')
-        bufferH.append(i_data)
+        # if i_dtype.is_floating_point:
+        #     i_data = torch.rand(*i_shape, dtype=i_dtype, device='cuda')
+        # else:
+        #     i_data = torch.randint(low=0, high=100, size=i_shape, dtype=i_dtype, device='cuda')
+        i_data = torch.empty(size=i_shape, dtype=i_dtype, device='cuda')
+        context.set_binding_shape(i, i_shape)
+        buffer.append(i_data)
 
     for i, o_shape in enumerate(output_shapes):
         o_dtype = torch_dtype_from_trt(output_dtypes[i])
         o_shape = tuple(o_shape)
-        if o_dtype.is_floating_point:
-            o_data = torch.rand(*o_shape, dtype=o_dtype, device='cuda')
-        else:
-            o_data = torch.randint(low=0, high=100, size=o_shape, dtype=o_dtype, device='cuda')
-        bufferH.append(o_data)
+        # if o_dtype.is_floating_point:
+        #     o_data = torch.rand(*o_shape, dtype=o_dtype, device='cuda')
+        # else:
+        #     o_data = torch.randint(low=0, high=100, size=o_shape, dtype=o_dtype, device='cuda')
+        o_data = torch.empty(size=o_shape, dtype=o_dtype, device='cuda')
+        buffer.append(o_data)
 
-    bufferD = [data.data_ptr() for data in bufferH]  # Get device pointers
+    # bufferD = [data.data_ptr() for data in bufferH]  # Get device pointers
 
-    # Set binding shapes
-    for i, input_name in enumerate(input_names):
-        context.set_binding_shape(i, input_shapes[i])
+    # # Set binding shapes
+    # for i, input_name in enumerate(input_names):
+    #     context.set_binding_shape(i, input_shapes[i])
+
+    for i in range(nIO):
+        context.set_tensor_address(lTensorName[i], int(buffer[i].data_ptr()))
+
+    context.execute_async_v3(stream)
 
     # Capture CUDA graph
     cudart.cudaStreamBeginCapture(stream, cudart.cudaStreamCaptureMode.cudaStreamCaptureModeGlobal)
-    for i in range(nIO):
-        context.set_tensor_address(lTensorName[i], int(bufferD[i]))
     context.execute_async_v3(stream)
     _, graph = cudart.cudaStreamEndCapture(stream)
     _, graphExe = cudart.cudaGraphInstantiate(graph, 0)  # for CUDA >= 12
 
-    # Launch the captured graph
-    cudart.cudaGraphLaunch(graphExe, stream)
-    cudart.cudaStreamSynchronize(stream)
+    # # Launch the captured graph
+    # cudart.cudaGraphLaunch(graphExe, stream)
+    # cudart.cudaStreamSynchronize(stream)
 
-    return bufferD, graphExe, stream
+    return buffer, graphExe, stream, context, lTensorName
 
 
 
@@ -185,10 +191,10 @@ class hackathon():
         # self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
 
-        self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream = \
+        self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context, self.model.control_bnames = \
             make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
         
-        self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream = \
+        self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context, self.model.unet_bnames = \
             make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
         ## TODO 补充warmup逻辑
@@ -203,7 +209,7 @@ class hackathon():
 
     def process(self, input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, low_threshold, high_threshold):
         
-        ddim_steps = 15
+        ddim_steps = 10
         with torch.no_grad():
             img = resize_image(HWC3(input_image), image_resolution)
             H, W, C = img.shape
