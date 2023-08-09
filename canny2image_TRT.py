@@ -16,6 +16,7 @@ from annotator.canny import CannyDetector
 from cldm.model import create_model, load_state_dict
 from cldm.ddim_hacked import DDIMSampler
 from ldm.util import log_txt_as_img, exists, instantiate_from_config
+from cuda import cudart
 
 
 
@@ -77,6 +78,84 @@ def make_context(engine_path, model_name, trt_logger):
 
 
 
+def torch_dtype_from_trt(trt_dtype):
+    # Convert TensorRT dtype to PyTorch dtype
+    return {
+        trt.float32: torch.float32,
+        trt.float16: torch.float16,
+        trt.int32:   torch.int32,
+        # Add other dtype conversions as needed
+    }[trt_dtype]
+
+
+
+
+def make_cuda_graph(engine_path, model_name, trt_logger):
+
+    assert os.path.exists(engine_path)
+
+    with open(engine_path, 'rb') as f:
+        engine_str = f.read()
+
+    engine = trt.Runtime(trt_logger).deserialize_cuda_engine(engine_str)
+    context = engine.create_execution_context()
+
+    # Get IO information
+    nIO = engine.num_io_tensors
+    lTensorName = [engine.get_tensor_name(i) for i in range(nIO)]
+    nInput = [engine.get_tensor_mode(lTensorName[i]) for i in range(nIO)].count(trt.TensorIOMode.INPUT)
+    input_names = [x for x in lTensorName if engine.get_tensor_mode(x) == trt.TensorIOMode.INPUT]
+    output_names = [x for x in lTensorName if engine.get_tensor_mode(x) == trt.TensorIOMode.OUTPUT]
+    input_shapes = [engine.get_tensor_shape(x) for x in input_names]
+    output_shapes = [engine.get_tensor_shape(x) for x in output_names]
+    input_dtypes = [engine.get_tensor_dtype(x) for x in input_names]
+    output_dtypes = [engine.get_tensor_dtype(x) for x in output_names]
+
+    # Create CUDA stream
+    _, stream = cudart.cudaStreamCreate()
+
+    # Initialize buffers using PyTorch tensors on CUDA
+    bufferH = []
+    for i, i_shape in enumerate(input_shapes):
+        i_dtype = torch_dtype_from_trt(input_dtypes[i])
+        i_shape = tuple(i_shape)
+        if i_dtype.is_floating_point:
+            i_data = torch.rand(*i_shape, dtype=i_dtype, device='cuda')
+        else:
+            i_data = torch.randint(low=0, high=100, size=i_shape, dtype=i_dtype, device='cuda')
+        bufferH.append(i_data)
+
+    for i, o_shape in enumerate(output_shapes):
+        o_dtype = torch_dtype_from_trt(output_dtypes[i])
+        o_shape = tuple(o_shape)
+        if o_dtype.is_floating_point:
+            o_data = torch.rand(*o_shape, dtype=o_dtype, device='cuda')
+        else:
+            o_data = torch.randint(low=0, high=100, size=o_shape, dtype=o_dtype, device='cuda')
+        bufferH.append(o_data)
+
+    bufferD = [data.data_ptr() for data in bufferH]  # Get device pointers
+
+    # Set binding shapes
+    for i, input_name in enumerate(input_names):
+        context.set_binding_shape(i, input_shapes[i])
+
+    # Capture CUDA graph
+    cudart.cudaStreamBeginCapture(stream, cudart.cudaStreamCaptureMode.cudaStreamCaptureModeGlobal)
+    for i in range(nIO):
+        context.set_tensor_address(lTensorName[i], int(bufferD[i]))
+    context.execute_async_v3(stream)
+    _, graph = cudart.cudaStreamEndCapture(stream)
+    _, graphExe = cudart.cudaGraphInstantiate(graph, 0)  # for CUDA >= 12
+
+    # Launch the captured graph
+    cudart.cudaGraphLaunch(graphExe, stream)
+    cudart.cudaStreamSynchronize(stream)
+
+    return bufferD, graphExe, stream
+
+
+
 class hackathon():
 
     def initialize(self):
@@ -87,10 +166,6 @@ class hackathon():
         self.ddim_sampler = DDIMSampler(self.model)
         self.trt_logger = trt.Logger(trt.Logger.WARNING)
         trt.init_libnvinfer_plugins(self.trt_logger, '')
-
-
-        H = 256
-        W = 384
 
         control_onnx = './onnx/control/model.onnx'
         control_plan = './engine/control.engine'
@@ -105,12 +180,24 @@ class hackathon():
         unet_onnx = './onnx/unet/model.onnx'
         unet_plan = './engine/unet.engine'
 
-        self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
+        # self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
 
-        self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
+        # self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
+
+        self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream = \
+            make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
+        
+        self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream = \
+            make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
+
+        ## TODO 补充warmup逻辑
 
         print("finished")
+
+
+    def __del__(self):
+        pass
 
 
 

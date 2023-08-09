@@ -2,6 +2,8 @@ import einops
 import torch
 import torch as th
 import torch.nn as nn
+import ctypes
+from cuda import cudart
 
 from ldm.modules.diffusionmodules.util import (
     conv_nd,
@@ -17,6 +19,33 @@ from ldm.modules.diffusionmodules.openaimodel import UNetModel, TimestepEmbedSeq
 from ldm.models.diffusion.ddpm import LatentDiffusion
 from ldm.util import log_txt_as_img, exists, instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
+
+
+def execute_graph(graph_exec, inputs, outputs, dev_buff, stream):
+    for i in range(len(inputs)):
+        i_dst = dev_buff[i]
+        i_src = ctypes.c_void_p(inputs[i].reshape(-1).data_ptr())
+        i_nbytes = inputs[i].numel() * inputs[i].element_size()
+        if 'cuda' in str(inputs[i].device):
+            i_trans = cudart.cudaMemcpyKind.cudaMemcpyDeviceToDevice
+        else:
+            i_trans = cudart.cudaMemcpyKind.cudaMemcpyHostToDevice
+        cudart.cudaMemcpyAsync(i_dst,  i_src, i_nbytes,  i_trans, stream)
+    cudart.cudaStreamSynchronize(stream)
+    
+    cudart.cudaGraphLaunch(graph_exec, stream)
+    
+    for i in range(len(outputs)):
+        o_src = dev_buff[len(inputs) + i]
+        o_dst = ctypes.c_void_p(outputs[i].reshape(-1).data_ptr())
+        o_nbytes = outputs[i].numel() * outputs[i].element_size()
+        if 'cuda' in str(outputs[i].device):
+            o_trans = cudart.cudaMemcpyKind.cudaMemcpyDeviceToDevice
+        else:
+            o_trans = cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost
+        cudart.cudaMemcpyAsync(o_dst,  o_src, o_nbytes, o_trans, stream)
+
+    cudart.cudaStreamSynchronize(stream)
 
 
 class ControlledUnetModel(UNetModel):
@@ -331,10 +360,110 @@ class ControlLDM(LatentDiffusion):
 
 
 
+    def apply_unet_graph_exec(self, x_noisy, t, cond, control = None):
+        
+        ## 构造输入输出
+        b, c, h, w = x_noisy.shape
+        cond_txt = torch.cat(cond['c_crossattn'], 1)
+        inputs = [x_noisy, t, cond_txt]
+        if control:
+            inputs += control
+        outputs = []
+        outputs.append(torch.zeros(b, c, h, w, dtype=torch.float32).to('cuda'))
+        
+        execute_graph(
+            graph_exec=self.unet_graph_exec, 
+            inputs=inputs, outputs=outputs, 
+            dev_buff=self.unet_dev_buff, 
+            stream=self.unet_stream,
+        )
+
+        return outputs
+    
+
+    def apply_control_graph_exec(self, x_noisy, t, cond):
+        
+        ## 构造输入输出
+        b, c, h, w = x_noisy.shape
+
+        cond_txt = torch.cat(cond['c_crossattn'], 1)
+        hint_in = torch.cat(cond['c_concat'], 1)
+
+        b, c, h, w = x_noisy.shape
+
+        inputs = []
+        inputs.append(x_noisy)
+        inputs.append(hint_in)
+        inputs.append(t)
+        inputs.append(cond_txt)
+
+
+        #         'ctrl0': [batch_size, 320, latent_height, latent_width],
+        #         'ctrl1': [batch_size, 320, latent_height, latent_width],
+        #         'ctrl2': [batch_size, 320, latent_height, latent_width],
+        #         'ctrl3': [batch_size, 320, latent_height//2, latent_width//2],
+        #         'ctrl4': [batch_size, 640, latent_height//2, latent_width//2],
+        #         'ctrl5': [batch_size, 640, latent_height//2, latent_width//2],
+        #         'ctrl6': [batch_size, 640, latent_height//4, latent_width//4],
+        #         'ctrl7': [batch_size, 1280, latent_height//4, latent_width//4],
+        #         'ctrl8': [batch_size, 1280, latent_height//4, latent_width//4],
+        #         'ctrl9': [batch_size, 1280, latent_height//8, latent_width//8],
+        #         'ctrl10': [batch_size, 1280, latent_height//8, latent_width//8],
+        #         'ctrl11': [batch_size, 1280, latent_height//8, latent_width//8],
+        #         'ctrl12': [batch_size, 1280, latent_height//8, latent_width//8],
+        
+        # ## controlnet 一共13个输出
+        # outputs = []
+        # outputs.append(torch.zeros(b, 320, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 320, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 320, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 320, h//2, w//2, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 640, h//2, w//2, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 640, h//2, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 640, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 1280, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 1280, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 1280, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 1280, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 1280, h, w, dtype=torch.float32).to('cuda'))
+        # outputs.append(torch.zeros(b, 1280, h, w, dtype=torch.float32).to('cuda'))
+
+        control_out = []
+
+        for i in range(3):
+            temp = torch.zeros(b, 320, h, w, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+        
+        temp = torch.zeros(b, 320, h//2, w//2, dtype=torch.float32).to("cuda")
+        control_out.append(temp)
+
+        for i in range(2):
+            temp = torch.zeros(b, 640, h//2, w//2, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+
+        ## out_bufer
+        temp = torch.zeros(b, 640, h//4, w//4, dtype=torch.float32).to("cuda")
+        control_out.append(temp)
+
+        for i in range(2):
+            temp = torch.zeros(b, 1280, h//4, w//4, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+
+        for i in range(4):
+            temp = torch.zeros(b, 1280, h//8, w//8, dtype=torch.float32).to("cuda")
+            control_out.append(temp)
+        
+        execute_graph(
+            graph_exec=self.unet_graph_exec, 
+            inputs=inputs, outputs=control_out, 
+            dev_buff=self.unet_dev_buff, 
+            stream=self.unet_stream,
+        )
+
+        return control_out
+
+
     def apply_unet(self, x_noisy, t, cond, control = None):
-        
-        
-        # eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, only_mid_control=self.only_mid_control)
 
         cond_txt = torch.cat(cond['c_crossattn'], 1)
 
@@ -358,7 +487,7 @@ class ControlLDM(LatentDiffusion):
         ## 执行推理
         self.unet_context.execute_v2(buffer_device)
 
-        return unet_out[0]
+        return unet_out
     
 
     def apply_control(self, x_noisy, t, cond):
@@ -410,7 +539,7 @@ class ControlLDM(LatentDiffusion):
         self.control_context.execute_v2(buffer_device)
 
         return [c * scale for c, scale in zip(control_out, self.control_scales)]
-
+    
 
     def apply_model(self, x_noisy, t, cond, *args, **kwargs):
         assert isinstance(cond, dict)
@@ -423,59 +552,10 @@ class ControlLDM(LatentDiffusion):
         if cond['c_concat'] is None:
             eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, only_mid_control=self.only_mid_control)
         else:
-            # control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt)
-            hint_in = torch.cat(cond['c_concat'], 1)
-
-            b, c, h, w = x_noisy.shape
-
-            buffer_device = []
-            buffer_device.append(x_noisy.reshape(-1).data_ptr())
-            buffer_device.append(hint_in.reshape(-1).data_ptr())
-            buffer_device.append(t.reshape(-1).data_ptr())
-            buffer_device.append(cond_txt.reshape(-1).data_ptr())
-
-            control_out = []
-
-            for i in range(3):
-                temp = torch.zeros(b, 320, h, w, dtype=torch.float32).to("cuda")
-                control_out.append(temp)
-                buffer_device.append(temp.reshape(-1).data_ptr())
-            
-            temp = torch.zeros(b, 320, h//2, w//2, dtype=torch.float32).to("cuda")
-            control_out.append(temp)
-            buffer_device.append(temp.reshape(-1).data_ptr())
-
-            for i in range(2):
-                temp = torch.zeros(b, 640, h//2, w//2, dtype=torch.float32).to("cuda")
-                control_out.append(temp)
-                buffer_device.append(temp.reshape(-1).data_ptr())
-
-            ## out_bufer
-            temp = torch.zeros(b, 640, h//4, w//4, dtype=torch.float32).to("cuda")
-            control_out.append(temp)
-            buffer_device.append(temp.reshape(-1).data_ptr())
-
-            for i in range(2):
-                temp = torch.zeros(b, 1280, h//4, w//4, dtype=torch.float32).to("cuda")
-                control_out.append(temp)
-                buffer_device.append(temp.reshape(-1).data_ptr())
-
-            for i in range(4):
-                temp = torch.zeros(b, 1280, h//8, w//8, dtype=torch.float32).to("cuda")
-                control_out.append(temp)
-                buffer_device.append(temp.reshape(-1).data_ptr())
-
-            ## 执行推理
-            self.control_context.execute_v2(buffer_device)
-
-            ## 获取结果
-            control = [c * scale for c, scale in zip(control_out, self.control_scales)]
-            # eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, only_mid_control=self.only_mid_control)
-            eps = self.apply_unet(x_noisy, t, cond, control)
-
-            # import pdb; pdb.set_trace();
-            # eps = self.apply_unet(x_noisy, t, cond, control)
-
+            # control = self.apply_control(x_noisy, t, cond)
+            control = self.apply_control_graph_exec(x_noisy, t, cond)
+            eps = self.apply_unet_graph_exec(x_noisy, t, cond, control)[0]
+            # eps = self.apply_unet(x_noisy, t, cond, control)[0]
         return eps
 
     @torch.no_grad()
