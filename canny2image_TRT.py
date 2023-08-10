@@ -72,6 +72,7 @@ def make_context(engine_path, model_name, trt_logger):
     context = engine.create_execution_context()
     
     for i, input_name in enumerate(input_shapes.keys()):
+        print(f'!! {model_name} setting shape {input_name} ===> f{input_shapes[input_name]}')
         context.set_binding_shape(i, input_shapes[input_name])
     
     return context
@@ -124,6 +125,8 @@ def make_cuda_graph(engine_path, model_name, trt_logger):
         # else:
         #     i_data = torch.randint(low=0, high=100, size=i_shape, dtype=i_dtype, device='cuda')
         i_data = torch.empty(size=i_shape, dtype=i_dtype, device='cuda')
+
+        print(f'!! {model_name} setting shape {input_names[i]} ===> f{i_shape}')
         context.set_binding_shape(i, i_shape)
         buffer.append(i_data)
 
@@ -186,15 +189,15 @@ class hackathon():
         unet_onnx = './onnx/unet/model.onnx'
         unet_plan = './engine/unet.engine'
 
-        # self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
+        self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
 
-        # self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
+        self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
 
-        self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context, self.model.control_bnames = \
+        self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context1, self.model.control_bnames = \
             make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
         
-        self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context, self.model.unet_bnames = \
+        self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context1, self.model.unet_bnames = \
             make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
         ## TODO 补充warmup逻辑

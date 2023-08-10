@@ -364,7 +364,7 @@ class ControlLDM(LatentDiffusion):
         
         execute_graph(
             graph_exec=self.unet_graph_exec,
-            context=self.unet_context,
+            context=self.unet_context1,
             inputs=inputs,
             dev_buff=self.unet_dev_buff, 
             stream=self.unet_stream,
@@ -458,7 +458,7 @@ class ControlLDM(LatentDiffusion):
 
         execute_graph(
             graph_exec=self.control_graph_exec,
-            context=self.control_context,
+            context=self.control_context1,
             inputs=inputs,
             dev_buff=self.control_dev_buff, 
             stream=self.control_stream,
@@ -558,10 +558,12 @@ class ControlLDM(LatentDiffusion):
             eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, only_mid_control=self.only_mid_control)
         else:
             # control = self.apply_control(x_noisy, t, cond)
-            control = self.apply_control_graph_exec(x_noisy, t, cond)
-            eps = self.apply_unet_graph_exec(x_noisy, t, cond, control)[0]
             # eps = self.apply_unet(x_noisy, t, cond, control)[0]
-        return eps
+            control1 = self.apply_control_graph_exec(x_noisy, t, cond)
+            eps1 = self.apply_unet_graph_exec(x_noisy, t, cond, control1)[0]
+            
+            # import pdb; pdb.set_trace()
+        return eps1
 
     @torch.no_grad()
     def get_unconditional_conditioning(self, N):
