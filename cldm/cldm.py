@@ -557,13 +557,13 @@ class ControlLDM(LatentDiffusion):
         if cond['c_concat'] is None:
             eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, only_mid_control=self.only_mid_control)
         else:
-            # control = self.apply_control(x_noisy, t, cond)
-            # eps = self.apply_unet(x_noisy, t, cond, control)[0]
-            control1 = self.apply_control_graph_exec(x_noisy, t, cond)
-            eps1 = self.apply_unet_graph_exec(x_noisy, t, cond, control1)[0]
+            control = self.apply_control(x_noisy, t, cond)
+            eps = self.apply_unet(x_noisy, t, cond, control)[0]
+            # control1 = self.apply_control_graph_exec(x_noisy, t, cond)
+            # eps1 = self.apply_unet_graph_exec(x_noisy, t, cond, control1)[0]
             
             # import pdb; pdb.set_trace()
-        return eps1
+        return eps
 
     @torch.no_grad()
     def get_unconditional_conditioning(self, N):
