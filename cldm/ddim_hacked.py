@@ -187,9 +187,16 @@ class DDIMSampler(object):
         if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
             model_output = self.model.apply_model(x, t, c)
         else:
-            model_t = self.model.apply_model(x, t, c)
-            model_uncond = self.model.apply_model(x, t, unconditional_conditioning)
+            # model_t = self.model.apply_model(x, t, c)
+            # model_uncond = self.model.apply_model(x, t, unconditional_conditioning)
+            # model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
+
+
+            model_t = self.model.apply_model(x, t, c, unet_using_graph = False, control_using_graph = True)
+            model_uncond = self.model.apply_model(x, t, unconditional_conditioning, unet_using_graph = True, control_using_graph = True)
             model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
+            # print(f"noise ===> {noise_pred}")
+            # import pdb; pdb.set_trace()
 
         if self.model.parameterization == "v":
             e_t = self.model.predict_eps_from_z_and_v(x, t, model_output)
@@ -253,12 +260,16 @@ class DDIMSampler(object):
             t = torch.full((x0.shape[0],), timesteps[i], device=self.model.device, dtype=torch.long)
             if unconditional_guidance_scale == 1.:
                 noise_pred = self.model.apply_model(x_next, t, c)
+                # print(f"noise ===> {noise_pred}")
+                # import pdb; pdb.set_trace()
             else:
                 assert unconditional_conditioning is not None
                 e_t_uncond, noise_pred = torch.chunk(
                     self.model.apply_model(torch.cat((x_next, x_next)), torch.cat((t, t)),
                                            torch.cat((unconditional_conditioning, c))), 2)
                 noise_pred = e_t_uncond + unconditional_guidance_scale * (noise_pred - e_t_uncond)
+                # print(f"noise ===> {noise_pred}")
+                # import pdb; pdb.set_trace()
 
             xt_weighted = (alphas_next[i] / alphas[i]).sqrt() * x_next
             weighted_noise_pred = alphas_next[i].sqrt() * (

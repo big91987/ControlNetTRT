@@ -143,17 +143,20 @@ def make_cuda_graph(engine_path, model_name, trt_logger):
     # bufferD = [data.data_ptr() for data in bufferH]  # Get device pointers
 
     # # Set binding shapes
-    # for i, input_name in enumerate(input_names):
-    #     context.set_binding_shape(i, input_shapes[i])
+    for i, input_name in enumerate(input_names):
+        context.set_binding_shape(i, input_shapes[i])
 
     for i in range(nIO):
         context.set_tensor_address(lTensorName[i], int(buffer[i].data_ptr()))
 
-    context.execute_async_v3(stream)
+    # context.execute_async_v3(stream)
+    
+    context.execute_async_v2([int(x.data_ptr()) for x in buffer], stream)
 
     # Capture CUDA graph
     cudart.cudaStreamBeginCapture(stream, cudart.cudaStreamCaptureMode.cudaStreamCaptureModeGlobal)
-    context.execute_async_v3(stream)
+    # context.execute_async_v3(stream)
+    context.execute_async_v2([int(x.data_ptr()) for x in buffer], stream)
     _, graph = cudart.cudaStreamEndCapture(stream)
     _, graphExe = cudart.cudaGraphInstantiate(graph, 0)  # for CUDA >= 12
 
@@ -189,16 +192,16 @@ class hackathon():
         unet_onnx = './onnx/unet/model.onnx'
         unet_plan = './engine/unet.engine'
 
-        self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
+        # self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
 
-        self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
+        # self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
 
-        # self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context1, self.model.control_bnames = \
-        #     make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
+        self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context, self.model.control_bnames = \
+            make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
         
-        # self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context1, self.model.unet_bnames = \
-        #     make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
+        self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context, self.model.unet_bnames = \
+            make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
         ## TODO 补充warmup逻辑
 
@@ -211,8 +214,7 @@ class hackathon():
 
 
     def process(self, input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, low_threshold, high_threshold):
-        
-        ddim_steps = 9
+        ddim_steps=10
         with torch.no_grad():
             img = resize_image(HWC3(input_image), image_resolution)
             H, W, C = img.shape

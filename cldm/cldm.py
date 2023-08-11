@@ -29,10 +29,10 @@ def execute_graph(graph_exec, context,  inputs, dev_buff, stream,  buff_names):
     for i in range(len(dev_buff)):
         context.set_tensor_address(buff_names[i], dev_buff[i].reshape(-1).data_ptr())
 
-    context.execute_async_v3(stream)
+    # context.execute_async_v3(stream)
     
-    # cudart.cudaGraphLaunch(graph_exec, stream)
-    # cudart.cudaStreamSynchronize(stream)
+    cudart.cudaGraphLaunch(graph_exec, stream)
+    cudart.cudaStreamSynchronize(stream)
 
 
 class ControlledUnetModel(UNetModel):
@@ -364,7 +364,7 @@ class ControlLDM(LatentDiffusion):
         
         execute_graph(
             graph_exec=self.unet_graph_exec,
-            context=self.unet_context1,
+            context=self.unet_context,
             inputs=inputs,
             dev_buff=self.unet_dev_buff, 
             stream=self.unet_stream,
@@ -458,7 +458,7 @@ class ControlLDM(LatentDiffusion):
 
         execute_graph(
             graph_exec=self.control_graph_exec,
-            context=self.control_context1,
+            context=self.control_context,
             inputs=inputs,
             dev_buff=self.control_dev_buff, 
             stream=self.control_stream,
@@ -546,7 +546,7 @@ class ControlLDM(LatentDiffusion):
         return [c * scale for c, scale in zip(control_out, self.control_scales)]
     
 
-    def apply_model(self, x_noisy, t, cond, *args, **kwargs):
+    def apply_model(self, x_noisy, t, cond, unet_using_graph = False, control_using_graph = False, *args, **kwargs):
         assert isinstance(cond, dict)
 
         # print('cond ===> {cond}')
@@ -556,13 +556,9 @@ class ControlLDM(LatentDiffusion):
         # print(cond)
         if cond['c_concat'] is None:
             eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, only_mid_control=self.only_mid_control)
-        else:
-            control = self.apply_control(x_noisy, t, cond)
-            eps = self.apply_unet(x_noisy, t, cond, control)[0]
-            # control1 = self.apply_control_graph_exec(x_noisy, t, cond)
-            # eps1 = self.apply_unet_graph_exec(x_noisy, t, cond, control1)[0]
-            
-            # import pdb; pdb.set_trace()
+        else:  
+            control = self.apply_control_graph_exec(x_noisy, t, cond) if control_using_graph else self.apply_control(x_noisy, t, cond)
+            eps = self.apply_unet_graph_exec(x_noisy, t, cond, control)[0] if unet_using_graph else self.apply_unet(x_noisy, t, cond, control)[0]
         return eps
 
     @torch.no_grad()
