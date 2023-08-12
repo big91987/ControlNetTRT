@@ -179,29 +179,44 @@ class hackathon():
         self.trt_logger = trt.Logger(trt.Logger.WARNING)
         trt.init_libnvinfer_plugins(self.trt_logger, '')
 
-        control_onnx = './onnx/control/model.onnx'
-        control_plan = './engine/control.engine'
+        # control_onnx = './onnx/control/model.onnx'
+        # control_plan = './engine/control.engine'
 
 
-        clip_onnx = './onnx/clip/model.onnx'
-        clip_plan = './engine/clip.engine'
+        # clip_onnx = './onnx/clip/model.onnx'
+        # clip_plan = './engine/clip.engine'
 
-        vae_onnx = './onnx/vae/model.onnx'
-        vae_plan = './engine/vae.engine'
+        # vae_onnx = './onnx/vae/model.onnx'
+        # vae_plan = './engine/vae.engine'
 
-        unet_onnx = './onnx/unet/model.onnx'
-        unet_plan = './engine/unet.engine'
+        # unet_onnx = './onnx/unet/model.onnx'
+        # unet_plan = './engine/unet.engine'
 
         # self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
 
         # self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
 
 
-        self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context, self.model.control_bnames = \
-            make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
+        # self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context, self.model.control_bnames = \
+        #     make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
         
-        self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context, self.model.unet_bnames = \
-            make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
+        # self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context, self.model.unet_bnames = \
+        #     make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
+        
+
+        uc2b_onnx = './onnx2/unet_with_spec_control/model.onnx'
+        uc2b_plan = './engine2/unet_with_spec_control.engine'
+
+        self.model.uc2b_buff, self.model.uc2b_ge, self.model.uc2b_stream, self.model.uc2b_context, self.model.uc2b_bnames = \
+        make_cuda_graph(uc2b_plan, model_name='uc2b', trt_logger=self.trt_logger)
+
+
+        ## 显存不够
+        # ddim_onnx = './onnx/ddim/model.onnx'
+        # ddim_plan = './engine/ddim.engine'
+
+        # self.model.ddim_dev_buff, self.model.ddim_graph_exec, self.model.ddim_stream, self.model.ddim_context, self.model.ddim_bnames = \
+        # make_cuda_graph(ddim_plan, model_name='ddim', trt_logger=self.trt_logger)
 
         ## TODO 补充warmup逻辑
 

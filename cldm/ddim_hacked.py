@@ -190,13 +190,17 @@ class DDIMSampler(object):
             # model_t = self.model.apply_model(x, t, c)
             # model_uncond = self.model.apply_model(x, t, unconditional_conditioning)
             # model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
+            # import pdb; pdb.set_trace()
 
-
-            model_t = self.model.apply_model(x, t, c, unet_using_graph = False, control_using_graph = True)
-            model_uncond = self.model.apply_model(x, t, unconditional_conditioning, unet_using_graph = True, control_using_graph = True)
-            model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
+            # model_t = self.model.apply_model(x, t, c, unet_using_graph = False, control_using_graph = True)
+            # model_uncond = self.model.apply_model(x, t, unconditional_conditioning, unet_using_graph = True, control_using_graph = True)
+            # model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
             # print(f"noise ===> {noise_pred}")
             # import pdb; pdb.set_trace()
+            # model_output = self.model.apply_uc2b(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
+            model_output = self.model.apply_uc2b_ge(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
+
+            # model_output = self.model.apply_uc2b_ge(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
 
         if self.model.parameterization == "v":
             e_t = self.model.predict_eps_from_z_and_v(x, t, model_output)

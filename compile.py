@@ -23,23 +23,38 @@ import onnx_graphsurgeon as gs
 from onnxruntime.transformers.float16 import convert_float_to_float16
 
 
-def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_axes, out_dir, convert_fp16 = True, const_folding = True):
+def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_axes, out_dir, convert_fp16 = True, const_folding = True, input_shapes = {}):
     tmp_dir = os.path.join(out_dir, f'__tmp_"{uuid.uuid1()}__"')
     tmp_path = os.path.join(tmp_dir, 'model.onnx')
     os.makedirs(tmp_dir, exist_ok=False)
 
-    torch.onnx.export(
-        model,               
-        inputs,  
-        tmp_path,   
-        export_params=True,
-        opset_version=16,
-        do_constant_folding=True,
-        keep_initializers_as_inputs=True,
-        input_names = input_names, 
-        output_names = output_names, 
-        dynamic_axes = dynamic_axes
-    )
+    if input_shapes:
+        torch.onnx.export(
+            model,               
+            inputs,  
+            tmp_path,   
+            export_params=True,
+            opset_version=16,
+            do_constant_folding=True,
+            keep_initializers_as_inputs=True,
+            input_names = input_names, 
+            output_names = output_names, 
+            dynamic_axes = dynamic_axes,
+            input_shapes = input_shapes,
+        )
+    else:
+        torch.onnx.export(
+            model,               
+            inputs,  
+            tmp_path,   
+            export_params=True,
+            opset_version=16,
+            do_constant_folding=True,
+            keep_initializers_as_inputs=True,
+            input_names = input_names, 
+            output_names = output_names, 
+            dynamic_axes = dynamic_axes
+        )
 
 
     tmp_model = onnx.load(tmp_path)
@@ -65,8 +80,135 @@ def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_ax
     )
 
     shutil.rmtree(tmp_dir)
+    
+
+# class UnetWithSpecControl(torch.nn.Module):
+#     def __init__(self, unet_model, control_model, only_mid_control=False):
+#         super().__init__()
+#         self.unet_model = unet_model
+#         self.control_model = control_model
+#         self.only_mid_control = only_mid_control
+#         # self.control_scale = control_scale
+
+#     def forward(self, x, h, t, c):
+#         control = self.control_model(x, h, t, c)
+#         return self.unet_model(x, t, c, control, self.only_mid_control)
 
 
+
+
+# import torch
+
+class UnetWithSpecControl(torch.nn.Module):
+
+    def __init__(self, unet_model, control_model, only_mid_control=False):
+        super().__init__()
+        self.unet_model = unet_model
+        self.control_model = control_model
+        self.only_mid_control = only_mid_control
+
+    def forward(self, x, h, t, c, control_scale):
+        
+        control = self.control_model(x, h, t, c)
+        
+        # 对control的13个元素依次乘以系数 
+        for i in range(13):
+            control[i] *= control_scale[i]
+            
+        return self.unet_model(x, t, c, control, self.only_mid_control)
+    
+
+
+
+# class DDIM_(torch.nn.Module):
+#     def __init__(self, unet_model, control_model, only_mid_control=False):
+#         super().__init__()
+
+#         # model_t = self.model.apply_model(x, t, c)
+#         # model_uncond = self.model.apply_model(x, t, unconditional_conditioning)
+#         # model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
+
+#         self.unet_model = unet_model
+#         self.control_model = control_model
+#         self.only_mid_control = only_mid_control
+
+#     def forward(self, x, t, c_t, c_u, h_t, h_u,  
+#             cs0, cs1, cs2, cs3, cs4, cs5, cs6, cs7, cs8, cs9, cs10, cs11, cs12,
+#             un_scale
+#         ):
+#         # h_t = torch.cat(c_concat, 1)
+#         # h_u = torch.cat(uc_concat, 1)
+#         # c_t = torch.cat(c_crossattn, 1)
+#         # c_u = torch.cat(uc_crossattn, 1)
+
+#         control_scale = (cs0, cs1, cs2, cs3, cs4, cs5, cs6, cs7, cs8, cs9, cs10, cs11, cs12)
+
+#         control_t = self.control_model(x, h_t, t, c_t)
+#         control_t = [control_scale[i] * control_t[i] for i in range(13)]
+#         model_t = self.unet_model(x, t, c_t, control_t, self.only_mid_control)
+#         control_u = self.control_model(x, h_u, t, c_u)
+#         control_u = [control_scale[i] * control_u[i] for i in range(13)]
+#         model_u = self.unet_model(x, t, c_u, control_u, self.only_mid_control)
+
+#         return model_u + un_scale * (model_t - model_u)
+
+
+
+# class DDIM_(torch.nn.Module):
+#     def __init__(self, unet_model, control_model, only_mid_control=False):
+#         super().__init__()
+        
+#         self.unet_model = unet_model
+#         self.control_model = control_model
+#         self.only_mid_control = only_mid_control
+
+#     def forward(self, 
+#                 x, t, 
+#                 c_t, c_u, 
+#                 h_t, h_u,
+#                 un_scale):
+        
+#         control_t = self.control_model(x, h_t, t, c_t)
+#         control_u = self.control_model(x, h_u, t, c_u)
+
+#         for i in range(13):
+#             control_t[i] = control_scale[i] * control_t[i]
+#             control_u[i] = control_scale[i] * control_u[i]
+        
+#         model_t = self.unet_model(x, t, c_t, control_t, self.only_mid_control)
+#         model_u = self.unet_model(x, t, c_u, control_u, self.only_mid_control)
+        
+#         return model_u + un_scale * (model_t - model_u)
+    
+
+
+# class DDIM_(torch.nn.Module):
+#     def __init__(self, unet_model, control_model, only_mid_control=False):
+#         super().__init__()
+        
+#         self.unet_model = unet_model
+#         self.control_model = control_model
+#         self.only_mid_control = only_mid_control
+        
+
+#     def forward(self, 
+#                 x, t, 
+#                 c_t, c_u, 
+#                 h_t, h_u,
+#                 un_scale,
+#                 ):
+        
+#         control_t = self.control_model(x, h_t, t, c_t)
+#         control_u = self.control_model(x, h_u, t, c_u)
+
+#         # for i in range(13):
+#         #     control_t[i] = strength * control_t[i]
+#         #     control_u[i] = strength * control_u[i]
+        
+#         model_t = self.unet_model(x, t, c_t, control_t, self.only_mid_control)
+#         model_u = self.unet_model(x, t, c_u, control_u, self.only_mid_control)
+        
+#         return model_u + un_scale * (model_t - model_u)
 
 
 
@@ -76,30 +218,23 @@ class ControlledUnetWrapperModel(torch.nn.Module):
         self.original_model = original_model
         self.only_mid_control = only_mid_control
 
-    def forward(self, x, timesteps, context, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12):
+    def forward(self, x, t, c, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12):
         control = [c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12]
-        return self.original_model(x, timesteps, context, control, self.only_mid_control)
-
-
-force_export = False
-force_build  = True
+        return self.original_model(x, t, c, control, self.only_mid_control)
 
 
 ## 图片大小
 H = 256
 W = 384
 
-onnx_dir = './onnx'
-onnx_opt_dir = './onnx_opt'
-engine_dir = './engine_dir'
+def export(model, model_name, out_dir, convert_fp16=True, const_folding=True, batch_size = 1):
 
-
-def export(model, model_name, out_dir, convert_fp16=True, const_folding=True):
+    input_shapes = {}
     if model_name == 'control':
-        x_in = torch.randn(1, 4, H//8, W//8, dtype=torch.float32).to("cuda")
-        h_in = torch.randn(1, 3, H, W, dtype=torch.float32).to("cuda") ## control img
-        t_in = torch.zeros(1, dtype=torch.int64).to("cuda") ## timestep
-        c_in = torch.randn(1, 77, 768, dtype=torch.float32).to("cuda") ## text_emb
+        x_in = torch.randn(batch_size, 4, H//8, W//8, dtype=torch.float32).to("cuda")
+        h_in = torch.randn(batch_size, 3, H, W, dtype=torch.float32).to("cuda") ## control img
+        t_in = torch.zeros(batch_size, dtype=torch.int64).to("cuda") ## timestep
+        c_in = torch.randn(batch_size, 77, 768, dtype=torch.float32).to("cuda") ## text_emb
 
         inputs = (x_in, h_in, t_in, c_in)
 
@@ -121,17 +256,82 @@ def export(model, model_name, out_dir, convert_fp16=True, const_folding=True):
         for i in range(13):
             dynamic_table[output_names[i]] = {0 : "bs"}
 
+
+    # elif model_name == 'ddim':
+        
+    #     x = torch.randn(batch_size, 4, H//8, W//8, dtype=torch.float32).to("cuda")
+    #     t = torch.zeros(1, dtype=torch.int64).to("cuda") ## timestep
+
+    #     c_t = torch.randn(batch_size, 77, 768, dtype=torch.float32).to("cuda") ## text_emb
+    #     c_u = torch.randn(batch_size, 77, 768, dtype=torch.float32).to("cuda") ## text_emb
+    #     h_t = torch.randn(batch_size, 3, H, W, dtype=torch.float32).to("cuda") ## control img
+    #     h_u = torch.randn(batch_size, 3, H, W, dtype=torch.float32).to("cuda") ## control img
+
+       
+    #     # strength = 1.0
+    #     un_scale = 1.0
+        
+
+    #     inputs = (x, t, c_t, c_u, h_t, h_u, un_scale)
+
+    #     input_names = [
+    #         'x', 't', 
+    #         'c_t', 'c_u', 'h_t', 'h_u', 
+    #         'un_scale',
+    #     ]
+    #     ## 输入 图片 提示 timestamp 
+    #     # controls = model(*inputs)
+
+    #     output_names = ['x_out']
+        
+    #     dynamic_table = {
+    #         'x' : {0 : 'bs', 2 : 'lh', 3 : 'lw'},
+    #         'c_t' : {0 : 'bs'},
+    #         'c_u' : {0 : 'bs'},
+    #         'h_t' : {0 : 'bs', 2 : 'H', 3 : 'W'}, 
+    #         'h_u' : {0 : 'bs', 2 : 'H', 3 : 'W'}, 
+    #         'x_out': {0 : 'bs', 2 : 'lh', 3 : 'lw'},
+    #     }
+
+    #     # input_shapes: {
+    #     #     "control_scale": [len(control_scale)],
+
+    #     # }
+            
+    elif model_name == 'unet_with_spec_control':
+        
+        x_in = torch.randn(batch_size, 4, H//8, W//8, dtype=torch.float32).to("cuda")
+        h_in = torch.randn(batch_size, 3, H, W, dtype=torch.float32).to("cuda") ## control img
+        t_in = torch.zeros(1, dtype=torch.int64).to("cuda") ## timestep
+        c_in = torch.randn(batch_size, 77, 768, dtype=torch.float32).to("cuda") ## text_emb
+        control_scale = torch.randn([13], dtype=torch.float32).to("cuda")
+
+        inputs = (x_in, h_in, t_in, c_in, control_scale)
+
+        input_names = ['x_in', 'h_in', 't_in', 'c_in', 'control_scale']
+        ## 输入 图片 提示 timestamp 
+        # controls = model(*inputs)
+
+        output_names = ['x_out']
+        
+        dynamic_table = {
+            'x_in' : {0 : 'bs', 2 : 'H', 3 : 'W'}, 
+            'h_in' : {0 : 'bs', 2 : '8H', 3 : '8W'}, 
+            # 't_in' : {0 : 'bs'},
+            'c_in' : {0 : 'bs'},
+            'x_out': {0 : 'bs', 2 : 'H', 3 : 'W'},
+        }
+        
+
     elif model_name == 'unet':
 
-        x_in = torch.randn(1, 4, H//8, W//8, dtype=torch.float32).to("cuda")
-        # h_in = torch.randn(1, 3, H, W, dtype=torch.float32).to("cuda") ## control img
-        t_in = torch.zeros(1, dtype=torch.int64).to("cuda") ## timestep
-        c_in = torch.randn(1, 77, 768, dtype=torch.float32).to("cuda") ## text_emb
+        x_in = torch.randn(batch_size, 4, H//8, W//8, dtype=torch.float32).to("cuda")
+        t_in = torch.zeros(batch_size, dtype=torch.int64).to("cuda") ## timestep
+        c_in = torch.randn(batch_size, 77, 768, dtype=torch.float32).to("cuda") ## text_emb
         ctrl = []
 
         latent_height = H // 8
         latent_width  = W // 8
-        batch_size = 1
 
         ctrl.append(torch.randn(batch_size, 320, latent_height, latent_width, dtype=torch.float32).to("cuda"))
         ctrl.append(torch.randn(batch_size, 320, latent_height, latent_width, dtype=torch.float32).to("cuda"))
@@ -148,12 +348,7 @@ def export(model, model_name, out_dir, convert_fp16=True, const_folding=True):
         ctrl.append(torch.randn(batch_size, 1280, latent_height//8, latent_width//8, dtype=torch.float32).to("cuda"))
 
         inputs = (x_in, t_in, c_in, *ctrl)
-
-
         model = ControlledUnetWrapperModel(model, only_mid_control=False)
-
-
-        # outs = wrapper_model(*inputs)
 
         output_names = ['x_out']
 
@@ -167,7 +362,6 @@ def export(model, model_name, out_dir, convert_fp16=True, const_folding=True):
 
         dynamic_table = {
             'x_in' : {0 : 'bs', 2 : 'H', 3 : 'W'}, 
-            # 'h_in' : {0 : 'bs', 2 : '8H', 3 : '8W'}, 
             't_in' : {0 : 'bs'},
             'c_in' : {0 : 'bs'},
             'ctrl0': {0 : 'bs'},
@@ -191,8 +385,6 @@ def export(model, model_name, out_dir, convert_fp16=True, const_folding=True):
         input = torch.randn(1, 4, H//8, W//8, dtype=torch.float32).to("cuda")
 
         inputs = (x_in,)
-
-        # img_out = model(input=input)
 
         output_names = ['images']
         
@@ -221,15 +413,24 @@ def export(model, model_name, out_dir, convert_fp16=True, const_folding=True):
 
     model(*inputs)
 
-    onnx_export(
-        model=model, model_name='control',
-        inputs=inputs, output_names=output_names, 
-        input_names=input_names, dynamic_axes=dynamic_table,
-        out_dir=out_dir, convert_fp16=convert_fp16, const_folding=const_folding
-    )
+    if model_name == 'ddim':
+        onnx_export(
+            model=model, model_name=model_name,
+            inputs=inputs, output_names=output_names, 
+            input_names=input_names, dynamic_axes=dynamic_table,
+            out_dir=out_dir, convert_fp16=convert_fp16, const_folding=const_folding,
+            # input_shapes = input_shapes,
+        )
+    else:
+        onnx_export(
+            model=model, model_name=model_name,
+            inputs=inputs, output_names=output_names, 
+            input_names=input_names, dynamic_axes=dynamic_table,
+            out_dir=out_dir, convert_fp16=convert_fp16, const_folding=const_folding,
+        )
 
 
-def compile(input_path, out_dir, model_name):
+def compile(input_path, out_dir, model_name, batch_size=1):
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir, exist_ok=True)
@@ -244,7 +445,6 @@ def compile(input_path, out_dir, model_name):
     img_channel = 3
     embedding_dim = 768
     text_maxlen = 77
-    batch_size = 1
 
 
     if model_name == 'control':
@@ -255,11 +455,29 @@ def compile(input_path, out_dir, model_name):
             't_in' : [batch_size], 
             'c_in' : [batch_size, text_maxlen, embedding_dim],
         }
+        
+    elif model_name == 'unet_with_spec_control':
 
-        
-        
+        input_shapes = {
+            'x_in' : [batch_size, latent_channel, latent_height, latent_width],
+            'h_in' : [batch_size, img_channel, img_hegint, img_width], 
+            't_in' : [1], 
+            'c_in' : [batch_size, text_maxlen, embedding_dim],
+            'control_scale': [13],
+        }
+
+    # elif model_name == 'ddim':
+    #     input_shapes = {
+    #         'x' : [batch_size, latent_channel, latent_height, latent_width], 
+    #         't' : [1], 
+    #         'c_t' : [batch_size, text_maxlen, embedding_dim],
+    #         'c_u' : [batch_size, text_maxlen, embedding_dim], 
+    #         'h_t' : [batch_size, img_channel, img_hegint, img_width], 
+    #         'h_u' : [batch_size, img_channel, img_hegint, img_width], 
+    #         'un_scale': [],
+    #     }
+    
     elif model_name == 'unet':
-
         input_shapes = {
             'x_in' : [batch_size, latent_channel, latent_height, latent_width], 
             't_in' : [batch_size], 
@@ -279,7 +497,7 @@ def compile(input_path, out_dir, model_name):
             'ctrl12': [batch_size, 1280, latent_height//8, latent_width//8],
         }
     
-    shape_str =  ','.join([k + ':' + 'x'.join([str(vv) for vv in v]) for k, v in input_shapes.items()])
+    shape_str =  ','.join([k + ':' + ('x'.join([str(vv) for vv in v]) if len(v) > 0 else '0') for k, v in input_shapes.items()])
     cmd = f"trtexec --onnx={input_path} --saveEngine={out_path} --fp16 --optShapes={shape_str}"
     print(f' ============ compile {model_name} begine =========')
     print(f' cmd ==> {cmd}')
@@ -290,28 +508,87 @@ def compile(input_path, out_dir, model_name):
 
 
 if __name__ == '__main__':
+    
+    
+    force_export = True
+    force_build  = True
     model = create_model('./models/cldm_v15.yaml').cpu()
     model.load_state_dict(load_state_dict(f'/home/player/ControlNet/models/control_sd15_canny.pth', location='cuda'))
     model = model.cuda()
+    
+    # ### ------------ 编译1batch ---------------------- ##
+
+    # control_model = model.control_model
+    # control_onnx = './onnx/control/model.onnx'
+    # control_plan = './engine/control.engine'
+
+    # clip_model = model.cond_stage_model
+    # clip_onnx = './onnx/clip/model.onnx'
+    # clip_plan = './engine/clip.engine'
+
+    # vae_model = model.first_stage_model
+    # vae_onnx = './onnx/vae/model.onnx'
+    # vae_plan = './engine/vae.engine'
+
+    # unet_model = model.model.diffusion_model
+    # unet_onnx = './onnx/unet/model.onnx'
+    # unet_plan = './engine/unet.engine'
+    
+    # unet_with_spec_control_model = UnetWithSpecControl(unet_model=unet_model, control_model = control_model, only_mid_control=False)
+    # unet_with_spec_control_onnx = './onnx/unet_with_spec_control/model.onnx'
+    # unet_with_spec_control_plan = './engine/unet_with_spec_control.engine'
+
+    # # export(model=control_model, model_name='control', out_dir='./onnx/control', const_folding=True, convert_fp16=False)
+    # # compile(input_path=control_onnx, out_dir='./engine/', model_name='control')
+
+    # # export(model=unet_model, model_name='unet', out_dir='./onnx/unet', const_folding=True, convert_fp16=False)
+    # # compile(input_path=unet_onnx, out_dir='./engine/', model_name='unet')
+    
+    # # export(model=unet_with_spec_control_model, model_name='unet_with_spec_control', 
+    # #        out_dir='./onnx/unet_with_spec_control', const_folding=True, convert_fp16=False, batch_size=1)
+    # # compile(input_path=unet_with_spec_control_onnx, out_dir='./engine/', model_name='unet_with_spec_control', batch_size=1)
+
+
+
+    # ## #显存不够
+    # # ddim_model = DDIM_(unet_model=unet_model, control_model=control_model, only_mid_control=False)
+    # # ddim_onnx = './onnx/ddim/model.onnx'
+    # # ddim_plan = './engine/ddim.engine'
+    
+    # # export(model=ddim_model, model_name='ddim', 
+    # #     out_dir='./onnx/ddim', const_folding=True, convert_fp16=False, batch_size=1)
+    # # compile(input_path=ddim_onnx, out_dir='./engine/', model_name='ddim', batch_size=1)
+    
+    
+    ##  ----------------  编译2batch ----------------------------
+    
 
     control_model = model.control_model
-    control_onnx = './onnx/control/model.onnx'
-    control_plan = './engine/control.engine'
-
-    clip_model = model.cond_stage_model
-    clip_onnx = './onnx/clip/model.onnx'
-    clip_plan = './engine/clip.engine'
-
-    vae_model = model.first_stage_model
-    vae_onnx = './onnx/vae/model.onnx'
-    vae_plan = './engine/vae.engine'
-
+    control_onnx = './onnx2/control/model.onnx'
+    control_plan = './engine2/control.engine'
+    
+    
     unet_model = model.model.diffusion_model
-    unet_onnx = './onnx/unet/model.onnx'
-    unet_plan = './engine/unet.engine'
-
-    export(model=control_model, model_name='control', out_dir='./onnx/control', const_folding=True, convert_fp16=False)
-    compile(input_path=control_onnx, out_dir='./engine/', model_name='control')
-
-    export(model=unet_model, model_name='unet', out_dir='./onnx/unet', const_folding=True, convert_fp16=False)
-    compile(input_path=unet_onnx, out_dir='./engine/', model_name='unet')
+    unet_onnx = './onnx2/unet/model.onnx'
+    unet_plan = './engine2/unet.engine'
+    
+    
+    
+    ## 联合
+    unet_with_spec_control_model = UnetWithSpecControl(unet_model=unet_model, control_model = control_model, only_mid_control=False)
+    unet_with_spec_control_onnx = './onnx2/unet_with_spec_control/model.onnx'
+    unet_with_spec_control_plan = './engine2/unet_with_spec_control.engine'
+    
+    
+    # export(model=control_model, model_name='control', out_dir='./onnx2/control', const_folding=True, convert_fp16=False, batch_size=2)
+    # compile(input_path=control_onnx, out_dir='./engine2/', model_name='control', batch_size=2)
+    
+    # export(model=unet_model, model_name='unet', out_dir='./onnx2/unet', const_folding=True, convert_fp16=False, batch_size=2)
+    # compile(input_path=unet_onnx, out_dir='./engine2/', model_name='unet', batch_size=2)
+    
+    os.makedirs('./onnx2/unet_with_spec_control/', exist_ok=True)
+    os.makedirs('./engine2/', exist_ok=True)
+    export(model=unet_with_spec_control_model, model_name='unet_with_spec_control', 
+           out_dir='./onnx2/unet_with_spec_control', const_folding=True, convert_fp16=False, batch_size=2)
+    compile(input_path=unet_with_spec_control_onnx, out_dir='./engine2/', model_name='unet_with_spec_control', batch_size=2)
+    
