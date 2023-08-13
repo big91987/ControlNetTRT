@@ -214,8 +214,9 @@ class hackathon():
         # make_cuda_graph(uc2b_plan, model_name='uc2b', trt_logger=self.trt_logger)
 
 
-        uc1b_onnx = './onnx/uc1b/model.onnx'
-        uc1b_plan = './engine/uc1b.engine'
+        # uc1b_onnx = './onnx/uc1b/model.onnx'
+        # uc1b_plan = './engine/uc1b.engine'
+        uc1b_plan = './engine/uc1b_opt5.engine'
 
         self.model.uc1b_buff, self.model.uc1b_ge, self.model.uc1b_stream, self.model.uc1b_context, self.model.uc1b_bnames = \
         make_cuda_graph(uc1b_plan, model_name='uc1b', trt_logger=self.trt_logger)
@@ -241,7 +242,7 @@ class hackathon():
 
 
 
-        vd_onnx = './onnx/vd/model.onnx'
+        # vd_onnx = './onnx/vd/model.onnx'
         vd_plan = './engine/vd.engine'
         self.model.vd_buff, self.model.vd_ge, self.model.vd_stream, self.model.vd_context, \
                 self.model.vd_bnames = make_cuda_graph(vd_plan, model_name='vd', trt_logger=self.trt_logger)

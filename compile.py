@@ -23,7 +23,11 @@ import onnx_graphsurgeon as gs
 from onnxruntime.transformers.float16 import convert_float_to_float16
 
 
-def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_axes, out_dir, convert_fp16 = True, const_folding = True, input_shapes = {}):
+def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_axes, out_path, convert_fp16 = True, const_folding = True, input_shapes = {}):
+    
+    out_dir = os.path.dirname(out_path)
+    assert os.path.exists(out_dir)
+    
     tmp_dir = os.path.join(out_dir, f'__tmp_"{uuid.uuid1()}__"')
     tmp_path = os.path.join(tmp_dir, 'model.onnx')
     os.makedirs(tmp_dir, exist_ok=False)
@@ -88,7 +92,7 @@ def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_ax
     
     onnx.save_model(
         tmp_model,
-        f'{out_dir}/model.onnx',
+        out_path,
         save_as_external_data=True,
         all_tensors_to_one_file=True,
         location=f"weight.pb",
@@ -301,7 +305,11 @@ class ClipWrapper(torch.nn.Module):
 H = 256
 W = 384
 
-def export(model, model_name, out_dir, convert_fp16=True, const_folding=True, batch_size = 1):
+def export(model, model_name, out_path, convert_fp16=True, const_folding=True, batch_size = 1):
+
+    out_dir = os.path.dirname(out_path)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
 
     input_shapes = {}
     if model_name == 'control':
@@ -537,7 +545,7 @@ def export(model, model_name, out_dir, convert_fp16=True, const_folding=True, ba
             model=model, model_name=model_name,
             inputs=inputs, output_names=output_names, 
             input_names=input_names, dynamic_axes=dynamic_table,
-            out_dir=out_dir, convert_fp16=convert_fp16, const_folding=const_folding,
+            out_path=out_path, convert_fp16=convert_fp16, const_folding=const_folding,
             # input_shapes = input_shapes,
         )
     else:
@@ -545,16 +553,17 @@ def export(model, model_name, out_dir, convert_fp16=True, const_folding=True, ba
             model=model, model_name=model_name,
             inputs=inputs, output_names=output_names, 
             input_names=input_names, dynamic_axes=dynamic_table,
-            out_dir=out_dir, convert_fp16=convert_fp16, const_folding=const_folding,
+            out_path=out_path, convert_fp16=convert_fp16, const_folding=const_folding,
         )
 
 
-def compile(input_path, out_dir, model_name, batch_size=1, fp16=True):
+def compile(input_path, out_path, model_name, batch_size=1, opts = ['--fp16']):
 
+    out_dir = os.path.dirname(out_path)
     if not os.path.exists(out_dir):
         os.makedirs(out_dir, exist_ok=True)
 
-    out_path = f'{out_dir}/{model_name}.engine'
+    # out_path = f'{out_dir}/{model_name}.engine'
 
     latent_height = H // 8
     latent_width  = W // 8
@@ -648,10 +657,12 @@ def compile(input_path, out_dir, model_name, batch_size=1, fp16=True):
         }
     
     shape_str =  ','.join([k + ':' + ('x'.join([str(vv) for vv in v]) if len(v) > 0 else '0') for k, v in input_shapes.items()])
-    if fp16:
-        cmd = f"trtexec --onnx={input_path} --saveEngine={out_path} --fp16 --optShapes={shape_str}"
-    else:
-        cmd = f"trtexec --onnx={input_path} --saveEngine={out_path} --optShapes={shape_str}"
+    
+    cmd = f"trtexec --onnx={input_path} --saveEngine={out_path} --optShapes={shape_str}"
+    
+    if opts:
+        cmd +=' ' + ' '.join(opts)
+        
     print(f' ============ compile {model_name} begine =========')
     print(f' cmd ==> {cmd}')
     t0 = time.time()
@@ -662,9 +673,6 @@ def compile(input_path, out_dir, model_name, batch_size=1, fp16=True):
 
 if __name__ == '__main__':
     
-    
-    force_export = True
-    force_build  = True
     model = create_model('./models/cldm_v15.yaml').cpu()
     model.load_state_dict(load_state_dict(f'/home/player/ControlNet/models/control_sd15_canny.pth', location='cuda'))
     model = model.cuda()
@@ -672,73 +680,36 @@ if __name__ == '__main__':
     # ### ------------ 编译1batch ---------------------- ##
 
     control_model = model.control_model
-    # control_onnx = './onnx/control/model.onnx'
-    # control_plan = './engine/control.engine'
-
+    unet_model = model.model.diffusion_model
     
-    # clip_model = ClipWrapper(
-    #     trans=model.cond_stage_model.transformer, 
-    #     layer=model.cond_stage_model.layer,
-    #     layer_idx=model.cond_stage_model.layer_idx,
-    # )
-    # # clip_model = model.cond_stage_model
-    # clip_onnx = './onnx/clip/model.onnx'
-    # clip_plan = './engine/clip.engine'
-
-    # vae_decoder_model = model.first_stage_model.decoder
-    # vae_decoder_onnx = './onnx/vae_decoder/model.onnx'
-    # vae_decoder_plan = './engine/vae_decoder.engine'
-
-
     vd_model = VD(decoder=model.first_stage_model.decoder, post_quant_conv=model.first_stage_model.post_quant_conv)
     vd_onnx = './onnx/vd/model.onnx'
     vd_plan = './engine/vd.engine'
 
-    export(model=vd_model, model_name='vd', 
-           out_dir='./onnx/vd', const_folding=True, convert_fp16=False, batch_size=1)
-    compile(input_path=vd_onnx, out_dir='./engine/', model_name='vd', batch_size=1)
 
-    unet_model = model.model.diffusion_model
-    # unet_onnx = './onnx/unet/model.onnx'
-    # unet_plan = './engine/unet.engine'
-    
-    # unet_with_spec_control_model = UnetWithSpecControl(unet_model=unet_model, control_model = control_model, only_mid_control=False)
-    # unet_with_spec_control_onnx = './onnx/unet_with_spec_control/model.onnx'
-    # unet_with_spec_control_plan = './engine/unet_with_spec_control.engine'
+    export(model=vd_model, model_name='vd', out_path=vd_onnx, const_folding=True, convert_fp16=False, batch_size=1)
+    compile(input_path=vd_onnx, out_path=vd_plan, model_name='vd', batch_size=1)
 
-    # # export(model=control_model, model_name='control', out_dir='./onnx/control', const_folding=True, convert_fp16=False)
-    # # compile(input_path=control_onnx, out_dir='./engine/', model_name='control')
-
-    # # export(model=unet_model, model_name='unet', out_dir='./onnx/unet', const_folding=True, convert_fp16=False)
-    # # compile(input_path=unet_onnx, out_dir='./engine/', model_name='unet')
-    
-    # # export(model=unet_with_spec_control_model, model_name='unet_with_spec_control', 
-    # #        out_dir='./onnx/unet_with_spec_control', const_folding=True, convert_fp16=False, batch_size=1)
-    # # compile(input_path=unet_with_spec_control_onnx, out_dir='./engine/', model_name='unet_with_spec_control', batch_size=1)
-
-
-
-    # export(model=vae_decoder_model, model_name='vae_decoder', 
-    #        out_dir='./onnx/vae_decoder', const_folding=True, convert_fp16=False, batch_size=1)
-    # compile(input_path=vae_decoder_onnx, out_dir='./engine/', model_name='vae_decoder', batch_size=1)
-
-
-
-    
-
-
-    # export(model=clip_model, model_name='clip', 
-    #        out_dir='./onnx/clip', const_folding=True, convert_fp16=False, batch_size=1)
-    # compile(input_path=clip_onnx, out_dir='./engine/', model_name='clip', batch_size=1, fp16=False)
-
-
-     # 联合
+    # 联合
     uc1b_model = UC1B(unet_model=unet_model, control_model = control_model, only_mid_control=False)
     uc1b_onnx = './onnx/uc1b/model.onnx'
     uc1b_plan = './engine/uc1b.engine'
 
-    export(model=uc1b_model, model_name='uc1b', out_dir='./onnx/uc1b', const_folding=True, convert_fp16=False, batch_size=1)
-    compile(input_path=uc1b_onnx, out_dir='./engine/', model_name='uc1b', batch_size=1)
+    export(model=uc1b_model, model_name='uc1b', out_path=uc1b_onnx, const_folding=True, convert_fp16=False, batch_size=1)
+    # compile(input_path=uc1b_onnx, out_path=uc1b_plan, model_name='uc1b', batch_size=1)
+
+
+    # # 编译失败，需要量化
+    # uc1b_fp8_plan = './engine/uc1b_fp8.engine'
+    # compile(input_path=uc1b_onnx, out_path=uc1b_fp8_plan, model_name='uc1b', batch_size=1, opts=['--fp8'])
+
+
+
+    uc1b_opt5_plan = './engine/uc1b_opt5.engine'
+    compile(input_path=uc1b_onnx, out_path=uc1b_opt5_plan, model_name='uc1b', batch_size=1, opts=['--fp16', '--builderOptimizationLevel=5'])
+
+
+
 
 
 
