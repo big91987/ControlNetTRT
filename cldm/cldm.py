@@ -505,38 +505,67 @@ class ControlLDM(LatentDiffusion):
         return unet_out
     
 
-    # def apply_uc2(self, x_noisy, t, cond, uncond):
+
+
+    def apply_uc1b_ge(self, x, t, cond, un_cond, un_scale):
         
-    #     # b, c, h, w = x_noisy.shape
+        h_t = torch.cat(cond['c_concat'], 1)
+        h_u = torch.cat(un_cond['c_concat'], 1)
+        c_t = torch.cat(cond['c_crossattn'], 1)
+        c_u = torch.cat(un_cond['c_crossattn'], 1)
+        control_scale = torch.tensor(self.control_scales, dtype=torch.float32).to('cuda')
+        un_scale = torch.tensor([un_scale], dtype=torch.float32).to('cuda')
 
-    #     cond_txt = torch.cat(cond['c_crossattn'], 1)
-    #     uncond_txt = torch.cat(uncond['c_crossattn'], 1)
+        inputs = []
+        inputs.append(x)
+        inputs.append(t)
+        inputs.append(h_t)
+        inputs.append(h_u)
+        inputs.append(c_t)
+        inputs.append(c_u)
+        inputs.append(control_scale)
+        inputs.append(un_scale)
 
-    #     cond_hint = torch.cat(cond['c_cconcat'], 1)
-    #     uncond_hint = torch.cat(uncond['c_cconcat'], 1)
+        execute_graph(
+            graph_exec=self.uc1b_ge,
+            context=self.uc1b_context,
+            inputs=inputs,
+            dev_buff=self.uc1b_buff, 
+            stream=self.uc1b_stream,
+            buff_names = self.uc1b_bnames, 
+        )
 
-    #     x_in = torch.cat([x_noisy, x_noisy.clone], 0)
-    #     t_in = torch.cat([t, t], 0)
-    #     h_in = torch.cat([cond_hint, uncond_hint], 0)
-    #     c_in = torch.cat([cond_txt,  uncond_txt],  0)
+        return self.uc1b_buff[-1]
+        # model_t = output[0].unsqueeze(0)
+        # model_u = output[1].unsqueeze(0)
 
-    #     buffer_device = []
-    #     buffer_device.append(x_in.reshape(-1).data_ptr())
-    #     # buffer_device.append(hint_in.reshape(-1).data_ptr())
-    #     buffer_device.append(t_in.reshape(-1).data_ptr())
-    #     buffer_device.append(h_in.reshape(-1).data_ptr())
-    #     buffer_device.append(c_in.reshape(-1).data_ptr())
+        # return model_u + un_scale * (model_t - model_u)
+    
 
+    def apply_uc1b(self, x, t, cond, un_cond, un_scale):
+        
+        h_t = torch.cat(cond['c_concat'], 1)
+        h_u = torch.cat(un_cond['c_concat'], 1)
+        c_t = torch.cat(cond['c_crossattn'], 1)
+        c_u = torch.cat(un_cond['c_crossattn'], 1)
+        control_scale = torch.tensor(self.control_scales, dtype=torch.float32).to('cuda')
+        un_scale = torch.tensor([un_scale], dtype=torch.float32).to('cuda')
 
-    #     out = []
-    #     temp = torch.zeros(*x_in.shape, dtype=torch.float32).to('cuda')
-    #     out.append(temp)
-    #     buffer_device.append(temp.reshape(-1).data_ptr())
-
-    #     ## 执行推理
-    #     self.unet_context.execute_v2(buffer_device)
-
-    #     return 
+        buf = []
+        buf.append(x.reshape(-1).data_ptr())
+        buf.append(t.reshape(-1).data_ptr())
+        buf.append(h_t.reshape(-1).data_ptr())
+        buf.append(h_u.reshape(-1).data_ptr())
+        buf.append(c_t.reshape(-1).data_ptr())
+        buf.append(c_u.reshape(-1).data_ptr())
+        buf.append(control_scale.reshape(-1).data_ptr())
+        buf.append(un_scale.reshape(-1).data_ptr())
+        
+        tmp = torch.zeros(*x.shape, dtype=torch.float32).to('cuda')
+        buf.append(tmp.reshape(-1).data_ptr())
+        self.uc1b_context.execute_v2(buf)
+        return tmp
+    
     
 
     def apply_control(self, x_noisy, t, cond):

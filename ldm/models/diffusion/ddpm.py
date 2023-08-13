@@ -27,10 +27,26 @@ from ldm.models.autoencoder import IdentityFirstStage, AutoencoderKL
 from ldm.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
 from ldm.models.diffusion.ddim import DDIMSampler
 
+from cuda import cudart
+
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
                          'adm': 'y'}
+
+
+def execute_graph(graph_exec, context,  inputs, dev_buff, stream,  buff_names):
+    
+    for i in range(len(inputs)):
+        dev_buff[i].copy_(inputs[i])
+
+    for i in range(len(dev_buff)):
+        context.set_tensor_address(buff_names[i], dev_buff[i].reshape(-1).data_ptr())
+
+    # context.execute_async_v3(stream)
+    
+    cudart.cudaGraphLaunch(graph_exec, stream)
+    cudart.cudaStreamSynchronize(stream)
 
 
 def disabled_train(self, mode=True):
@@ -673,6 +689,48 @@ class LatentDiffusion(DDPM):
             assert hasattr(self.cond_stage_model, self.cond_stage_forward)
             c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
         return c
+    
+
+    # 经验证，encoder对精度很敏感，无法满足需求
+    # def get_learned_conditioning(self, c):
+
+    #     if self.cond_stage_forward is None:
+    #         if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
+    #             c1 = self.cond_stage_model.encode(c)
+    #             if isinstance(c1, DiagonalGaussianDistribution):
+    #                 c1 = c1.mode()
+    #         else:
+    #             c1 = self.cond_stage_model(c)
+    #     else:
+    #         assert hasattr(self.cond_stage_model, self.cond_stage_forward)
+    #         c1 = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
+
+    #     tok = self.cond_stage_model.get_tokens(c)
+    #     execute_graph(
+    #         graph_exec=self.clip_ge,
+    #         context=self.clip_context,
+    #         inputs=[tok],
+    #         dev_buff=self.clip_buff, 
+    #         stream=self.clip_stream,
+    #         buff_names = self.clip_bnames, 
+    #     )
+    #     c2 =  self.clip_buff[-1]
+
+    #     # import pdb; pdb.set_trace()
+    #     return c2
+    
+
+    # def get_learned_conditioning(self, c):
+    #     execute_graph(
+    #         graph_exec=self.clip_ge,
+    #         context=self.clip_context,
+    #         inputs=[self.cond_stage_model.get_tokens(c)],
+    #         dev_buff=self.clip_buff, 
+    #         stream=self.clip_stream,
+    #         buff_names = self.clip_bnames, 
+    #     )
+    #     return self.clip_buff[-1]
+    
 
     def meshgrid(self, h, w):
         y = torch.arange(0, h).view(h, 1, 1).repeat(1, w, 1)
@@ -816,6 +874,18 @@ class LatentDiffusion(DDPM):
             out.append(xc)
         return out
 
+    # @torch.no_grad()
+    # def decode_first_stage(self, z, predict_cids=False, force_not_quantize=False):
+    #     if predict_cids:
+    #         if z.dim() == 4:
+    #             z = torch.argmax(z.exp(), dim=1).long()
+    #         z = self.first_stage_model.quantize.get_codebook_entry(z, shape=None)
+    #         z = rearrange(z, 'b h w c -> b c h w').contiguous()
+
+    #     z = 1. / self.scale_factor * z
+    #     return self.first_stage_model.decode(z)
+    
+
     @torch.no_grad()
     def decode_first_stage(self, z, predict_cids=False, force_not_quantize=False):
         if predict_cids:
@@ -825,7 +895,19 @@ class LatentDiffusion(DDPM):
             z = rearrange(z, 'b h w c -> b c h w').contiguous()
 
         z = 1. / self.scale_factor * z
-        return self.first_stage_model.decode(z)
+        # return self.first_stage_model.decode(z)
+
+        execute_graph(
+            graph_exec=self.vd_ge,
+            context=self.vd_context,
+            inputs=[z],
+            dev_buff=self.vd_buff, 
+            stream=self.vd_stream,
+            buff_names = self.vd_bnames, 
+        )
+
+        return self.vd_buff[-1]
+        
 
     @torch.no_grad()
     def encode_first_stage(self, x):

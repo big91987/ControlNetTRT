@@ -17,65 +17,66 @@ from cldm.model import create_model, load_state_dict
 from cldm.ddim_hacked import DDIMSampler
 from ldm.util import log_txt_as_img, exists, instantiate_from_config
 from cuda import cudart
+import datetime
 
 
 
-def make_context(engine_path, model_name, trt_logger):
-    H = 256
-    W = 384
-    assert os.path.exists(engine_path)
-    latent_height = H // 8
-    latent_width  = W // 8
-    latent_channel  = 4
-    img_hegint = H
-    img_width = W
-    img_channel = 3
-    embedding_dim = 768
-    text_maxlen = 77
-    batch_size = 1
+# def make_context(engine_path, model_name, trt_logger):
+#     H = 256
+#     W = 384
+#     assert os.path.exists(engine_path)
+#     latent_height = H // 8
+#     latent_width  = W // 8
+#     latent_channel  = 4
+#     img_hegint = H
+#     img_width = W
+#     img_channel = 3
+#     embedding_dim = 768
+#     text_maxlen = 77
+#     batch_size = 1
 
-    if model_name == 'control':
-        input_shapes = {
-            'x_in' : [batch_size, latent_channel, latent_height, latent_width],
-            'h_in' : [batch_size, img_channel, img_hegint, img_width], 
-            't_in' : [batch_size], 
-            'c_in' : [batch_size, text_maxlen, embedding_dim],
-        }
+#     if model_name == 'control':
+#         input_shapes = {
+#             'x_in' : [batch_size, latent_channel, latent_height, latent_width],
+#             'h_in' : [batch_size, img_channel, img_hegint, img_width], 
+#             't_in' : [batch_size], 
+#             'c_in' : [batch_size, text_maxlen, embedding_dim],
+#         }
 
-    elif model_name == 'unet':
+#     elif model_name == 'unet':
 
-        input_shapes = {
-            'x_in' : [batch_size, latent_channel, latent_height, latent_width], 
-            't_in' : [batch_size], 
-            'c_in' : [batch_size, text_maxlen, embedding_dim], 
-            'ctrl0': [batch_size, 320, latent_height, latent_width],
-            'ctrl1': [batch_size, 320, latent_height, latent_width],
-            'ctrl2': [batch_size, 320, latent_height, latent_width],
-            'ctrl3': [batch_size, 320, latent_height//2, latent_width//2],
-            'ctrl4': [batch_size, 640, latent_height//2, latent_width//2],
-            'ctrl5': [batch_size, 640, latent_height//2, latent_width//2],
-            'ctrl6': [batch_size, 640, latent_height//4, latent_width//4],
-            'ctrl7': [batch_size, 1280, latent_height//4, latent_width//4],
-            'ctrl8': [batch_size, 1280, latent_height//4, latent_width//4],
-            'ctrl9': [batch_size, 1280, latent_height//8, latent_width//8],
-            'ctrl10': [batch_size, 1280, latent_height//8, latent_width//8],
-            'ctrl11': [batch_size, 1280, latent_height//8, latent_width//8],
-            'ctrl12': [batch_size, 1280, latent_height//8, latent_width//8],
-        }
-    else:
-        return None
+#         input_shapes = {
+#             'x_in' : [batch_size, latent_channel, latent_height, latent_width], 
+#             't_in' : [batch_size], 
+#             'c_in' : [batch_size, text_maxlen, embedding_dim], 
+#             'ctrl0': [batch_size, 320, latent_height, latent_width],
+#             'ctrl1': [batch_size, 320, latent_height, latent_width],
+#             'ctrl2': [batch_size, 320, latent_height, latent_width],
+#             'ctrl3': [batch_size, 320, latent_height//2, latent_width//2],
+#             'ctrl4': [batch_size, 640, latent_height//2, latent_width//2],
+#             'ctrl5': [batch_size, 640, latent_height//2, latent_width//2],
+#             'ctrl6': [batch_size, 640, latent_height//4, latent_width//4],
+#             'ctrl7': [batch_size, 1280, latent_height//4, latent_width//4],
+#             'ctrl8': [batch_size, 1280, latent_height//4, latent_width//4],
+#             'ctrl9': [batch_size, 1280, latent_height//8, latent_width//8],
+#             'ctrl10': [batch_size, 1280, latent_height//8, latent_width//8],
+#             'ctrl11': [batch_size, 1280, latent_height//8, latent_width//8],
+#             'ctrl12': [batch_size, 1280, latent_height//8, latent_width//8],
+#         }
+#     else:
+#         return None
 
-    with open(engine_path, 'rb') as f:
-        engine_str = f.read()
+#     with open(engine_path, 'rb') as f:
+#         engine_str = f.read()
 
-    engine = trt.Runtime(trt_logger).deserialize_cuda_engine(engine_str)
-    context = engine.create_execution_context()
+#     engine = trt.Runtime(trt_logger).deserialize_cuda_engine(engine_str)
+#     context = engine.create_execution_context()
     
-    for i, input_name in enumerate(input_shapes.keys()):
-        print(f'!! {model_name} setting shape {input_name} ===> f{input_shapes[input_name]}')
-        context.set_binding_shape(i, input_shapes[input_name])
+#     for i, input_name in enumerate(input_shapes.keys()):
+#         print(f'!! {model_name} setting shape {input_name} ===> f{input_shapes[input_name]}')
+#         context.set_binding_shape(i, input_shapes[input_name])
     
-    return context
+#     return context
 
 
 
@@ -204,11 +205,20 @@ class hackathon():
         #     make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
         
 
-        uc2b_onnx = './onnx2/unet_with_spec_control/model.onnx'
-        uc2b_plan = './engine2/unet_with_spec_control.engine'
+        # uc2b_onnx = './onnx2/unet_with_spec_control/model.onnx'
+        # uc2b_plan = './engine2/unet_with_spec_control.engine'
+        # # uc2b_plan = './engine2/uc2b_preuned.engine'
 
-        self.model.uc2b_buff, self.model.uc2b_ge, self.model.uc2b_stream, self.model.uc2b_context, self.model.uc2b_bnames = \
-        make_cuda_graph(uc2b_plan, model_name='uc2b', trt_logger=self.trt_logger)
+
+        # self.model.uc2b_buff, self.model.uc2b_ge, self.model.uc2b_stream, self.model.uc2b_context, self.model.uc2b_bnames = \
+        # make_cuda_graph(uc2b_plan, model_name='uc2b', trt_logger=self.trt_logger)
+
+
+        uc1b_onnx = './onnx/uc1b/model.onnx'
+        uc1b_plan = './engine/uc1b.engine'
+
+        self.model.uc1b_buff, self.model.uc1b_ge, self.model.uc1b_stream, self.model.uc1b_context, self.model.uc1b_bnames = \
+        make_cuda_graph(uc1b_plan, model_name='uc1b', trt_logger=self.trt_logger)
 
 
         ## 显存不够
@@ -218,7 +228,51 @@ class hackathon():
         # self.model.ddim_dev_buff, self.model.ddim_graph_exec, self.model.ddim_stream, self.model.ddim_context, self.model.ddim_bnames = \
         # make_cuda_graph(ddim_plan, model_name='ddim', trt_logger=self.trt_logger)
 
+
+        # vae_decoder_model = model.first_stage_model.decoder
+        # vae_decoder_onnx = './onnx/vae_decoder/model.onnx'
+        # vae_decoder_plan = './engine/vae_decoder.engine'
+        # self.model.first_stage_model.vae_decoder_buff, self.model.first_stage_model.vae_decoder_ge, \
+        #     self.model.first_stage_model.vae_decoder_stream, self.model.first_stage_model.vae_decoder_context, \
+        #         self.model.first_stage_model.vae_decoder_bnames = \
+        #             make_cuda_graph(vae_decoder_plan, model_name='vae_decoder', trt_logger=self.trt_logger)
+
         ## TODO 补充warmup逻辑
+
+
+
+        vd_onnx = './onnx/vd/model.onnx'
+        vd_plan = './engine/vd.engine'
+        self.model.vd_buff, self.model.vd_ge, self.model.vd_stream, self.model.vd_context, \
+                self.model.vd_bnames = make_cuda_graph(vd_plan, model_name='vd', trt_logger=self.trt_logger)
+
+
+        # clip_onnx = './onnx/clip/model.onnx'
+        # clip_plan = './engine/clip.engine'
+        # self.model.clip_buff, self.model.clip_ge, self.model.clip_stream, self.model.clip_context, \
+        #         self.model.clip_bnames = make_cuda_graph(clip_plan, model_name='clip', trt_logger=self.trt_logger)
+
+
+        print(" --------- warm up begin -----------")
+        path = "./warmup/bird_0.jpg"
+        img = cv2.imread(path)
+        start = datetime.datetime.now().timestamp()
+        new_img = self.process(img,
+                "a bird", 
+                "best quality, extremely detailed", 
+                "longbody, lowres, bad anatomy, bad hands, missing fingers", 
+                1, 
+                256, 
+                20,
+                False, 
+                1, 
+                9, 
+                2946901, 
+                0.0, 
+                100, 
+                200)
+        end = datetime.datetime.now().timestamp()
+        print(f" --------- warm up end, dt = {(end-start)*1000} ms-----------")
 
         print("finished")
 

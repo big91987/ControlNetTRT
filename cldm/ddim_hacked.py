@@ -100,33 +100,35 @@ class DDIMSampler(object):
         size = (batch_size, C, H, W)
         print(f'Data shape for DDIM sampling is {size}, eta {eta}')
 
-        samples, intermediates = self.ddim_sampling(conditioning, size,
-                                                    callback=callback,
-                                                    img_callback=img_callback,
-                                                    quantize_denoised=quantize_x0,
-                                                    mask=mask, x0=x0,
-                                                    ddim_use_original_steps=False,
-                                                    noise_dropout=noise_dropout,
-                                                    temperature=temperature,
-                                                    score_corrector=score_corrector,
-                                                    corrector_kwargs=corrector_kwargs,
-                                                    x_T=x_T,
-                                                    log_every_t=log_every_t,
-                                                    unconditional_guidance_scale=unconditional_guidance_scale,
-                                                    unconditional_conditioning=unconditional_conditioning,
-                                                    dynamic_threshold=dynamic_threshold,
-                                                    ucg_schedule=ucg_schedule
-                                                    )
+        samples, intermediates = self.ddim_sampling(
+            conditioning, size,
+            callback=callback,
+            img_callback=img_callback,
+            quantize_denoised=quantize_x0,
+            mask=mask, x0=x0,
+            ddim_use_original_steps=False,
+            noise_dropout=noise_dropout,
+            temperature=temperature,
+            score_corrector=score_corrector,
+            corrector_kwargs=corrector_kwargs,
+            x_T=x_T,
+            log_every_t=log_every_t,
+            unconditional_guidance_scale=unconditional_guidance_scale,
+            unconditional_conditioning=unconditional_conditioning,
+            dynamic_threshold=dynamic_threshold,
+            ucg_schedule=ucg_schedule
+        )
         return samples, intermediates
 
     @torch.no_grad()
     def ddim_sampling(self, cond, shape,
-                      x_T=None, ddim_use_original_steps=False,
-                      callback=None, timesteps=None, quantize_denoised=False,
-                      mask=None, x0=None, img_callback=None, log_every_t=100,
-                      temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
-                      unconditional_guidance_scale=1., unconditional_conditioning=None, dynamic_threshold=None,
-                      ucg_schedule=None):
+        x_T=None, ddim_use_original_steps=False,
+        callback=None, timesteps=None, quantize_denoised=False,
+        mask=None, x0=None, img_callback=None, log_every_t=100,
+        temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
+        unconditional_guidance_scale=1., unconditional_conditioning=None, dynamic_threshold=None,
+        ucg_schedule=None
+    ):
         device = self.model.betas.device
         b = shape[0]
         if x_T is None:
@@ -198,9 +200,10 @@ class DDIMSampler(object):
             # print(f"noise ===> {noise_pred}")
             # import pdb; pdb.set_trace()
             # model_output = self.model.apply_uc2b(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
-            model_output = self.model.apply_uc2b_ge(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
-
             # model_output = self.model.apply_uc2b_ge(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
+
+            # model_output = self.model.apply_uc1b(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
+            model_output = self.model.apply_uc1b_ge(x, t, c, unconditional_conditioning, unconditional_guidance_scale)
 
         if self.model.parameterization == "v":
             e_t = self.model.predict_eps_from_z_and_v(x, t, model_output)
