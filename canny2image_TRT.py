@@ -106,6 +106,10 @@ class hackathon():
         self.model.vd_buff, self.model.vd_ge, self.model.vd_stream, self.model.vd_context, \
                 self.model.vd_bnames = make_cuda_graph(vd_plan, model_name='vd', trt_logger=self.trt_logger)
         
+        clip_plan = './engine/clip.engine'
+        self.model.clip_buff, self.model.clip_ge, self.model.clip_stream, self.model.clip_context, \
+                self.model.clip_bnames = make_cuda_graph(clip_plan, model_name='clip', trt_logger=self.trt_logger)
+        
         print(" --------- warm up begin -----------")
         path = "./warmup/bird_0.jpg"
         img = cv2.imread(path)
@@ -134,7 +138,7 @@ class hackathon():
 
 
     def process(self, input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, low_threshold, high_threshold):
-        ddim_steps=10
+        ddim_steps=8
         with torch.no_grad():
             img = resize_image(HWC3(input_image), image_resolution)
             H, W, C = img.shape

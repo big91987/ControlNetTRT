@@ -677,47 +677,59 @@ class LatentDiffusion(DDPM):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
-    def get_learned_conditioning(self, c):
-        if self.cond_stage_forward is None:
-            if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
-                c = self.cond_stage_model.encode(c)
-                if isinstance(c, DiagonalGaussianDistribution):
-                    c = c.mode()
-            else:
-                c = self.cond_stage_model(c)
-        else:
-            assert hasattr(self.cond_stage_model, self.cond_stage_forward)
-            c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
-        return c
+    # def get_learned_conditioning(self, c):
+    #     if self.cond_stage_forward is None:
+    #         if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
+    #             c = self.cond_stage_model.encode(c)
+    #             if isinstance(c, DiagonalGaussianDistribution):
+    #                 c = c.mode()
+    #         else:
+    #             c = self.cond_stage_model(c)
+    #     else:
+    #         assert hasattr(self.cond_stage_model, self.cond_stage_forward)
+    #         c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
+    #     return c
     
 
     # 经验证，encoder对精度很敏感，无法满足需求
-    # def get_learned_conditioning(self, c):
+    def get_learned_conditioning(self, c):
 
-    #     if self.cond_stage_forward is None:
-    #         if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
-    #             c1 = self.cond_stage_model.encode(c)
-    #             if isinstance(c1, DiagonalGaussianDistribution):
-    #                 c1 = c1.mode()
-    #         else:
-    #             c1 = self.cond_stage_model(c)
-    #     else:
-    #         assert hasattr(self.cond_stage_model, self.cond_stage_forward)
-    #         c1 = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
+        # if self.cond_stage_forward is None:
+        #     if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
+        #         c1 = self.cond_stage_model.encode(c)
+        #         if isinstance(c1, DiagonalGaussianDistribution):
+        #             c1 = c1.mode()
+        #     else:
+        #         c1 = self.cond_stage_model(c)
+        # else:
+        #     assert hasattr(self.cond_stage_model, self.cond_stage_forward)
+        #     c1 = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
 
-    #     tok = self.cond_stage_model.get_tokens(c)
-    #     execute_graph(
-    #         graph_exec=self.clip_ge,
-    #         context=self.clip_context,
-    #         inputs=[tok],
-    #         dev_buff=self.clip_buff, 
-    #         stream=self.clip_stream,
-    #         buff_names = self.clip_bnames, 
-    #     )
-    #     c2 =  self.clip_buff[-1]
+        # tok = self.cond_stage_model.get_tokens(c)
+        # execute_graph(
+        #     graph_exec=self.clip_ge,
+        #     context=self.clip_context,
+        #     inputs=[tok],
+        #     dev_buff=self.clip_buff, 
+        #     stream=self.clip_stream,
+        #     buff_names = self.clip_bnames, 
+        # )
+        # c2 =  self.clip_buff[-1]
 
-    #     # import pdb; pdb.set_trace()
-    #     return c2
+
+        tok = self.cond_stage_model.get_tokens(c)
+        buf = []
+        buf.append(tok.reshape(-1).data_ptr())
+        
+        c3 = torch.zeros(*tok.shape, 768, dtype=torch.float32).to('cuda')
+        buf.append(c3.reshape(-1).data_ptr())
+
+        tmp  = torch.zeros(1, 768, dtype=torch.float32).to('cuda')
+        buf.append(tmp.reshape(-1).data_ptr())
+
+        self.clip_context.execute_v2(buf)
+
+        return c3
     
 
     # def get_learned_conditioning(self, c):

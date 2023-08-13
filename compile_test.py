@@ -63,7 +63,7 @@ def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_ax
 
     tmp_model = onnx.load(tmp_path)
 
-    # for clip change -inf to -100000
+    # # for clip change -inf to -100000
     # if model_name == 'clip':
     #     for node in tmp_model.graph.node:
     #         # if node.name == "/text_model/ConstantOfShape_1":
@@ -705,8 +705,8 @@ if __name__ == '__main__':
 
 
 
-    uc1b_opt5_plan = './engine/uc1b_opt5.engine'
-    compile(input_path=uc1b_onnx, out_path=uc1b_opt5_plan, model_name='uc1b', batch_size=1, opts=['--fp16', '--sparsity=force'])
+    # uc1b_opt5_plan = './engine/uc1b_opt5.engine'
+    # compile(input_path=uc1b_onnx, out_path=uc1b_opt5_plan, model_name='uc1b', batch_size=1, opts=['--fp16', '--sparsity=force'])
 
 
     # clip_model = ClipWrapper(
@@ -717,9 +717,33 @@ if __name__ == '__main__':
     # clip_onnx = './onnx/clip/model.onnx'
     # clip_plan = './engine/clip.engine'
     # export(model=clip_model, model_name='clip', out_path=clip_onnx, const_folding=True, convert_fp16=False, batch_size=1)
-    # compile(input_path=clip_onnx, out_path=clip_plan, model_name='clip', batch_size=1, opts=['--best'])
+    # compile(input_path=clip_onnx, out_path=clip_plan, model_name='clip', batch_size=1, opts=['--noTF32'])
 
-
+    
+    clip_onnx2 = './onnx/clip2/model.onnx'
+    clip_plan2 = './engine/clip2.engine'
+    from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextModel
+    clip_model =  CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").cuda()
+    os.makedirs(os.path.dirname(clip_onnx2), exist_ok=True)
+    os.makedirs(os.path.dirname(clip_plan2), exist_ok=True)
+    input_ids = torch.ones(1, 77, dtype=torch.int64).to('cuda')
+    torch.onnx.export(
+        clip_model,
+        (input_ids),
+        clip_onnx2,
+        export_params=True,
+        opset_version = 18,
+        do_constant_folding = True,
+        keep_initializers_as_inputs = True,
+        input_names=['input_ids'],
+        output_names=['context', 'pooled_output'],
+        dynamic_axes={
+            'input_ids': {0:'bs'},
+            'context': {0:'bs'},
+            'pooled_output': {0:'bs'},
+        }
+    )
+    os.system(f'trtexec --onnx={clip_onnx2} --saveEngine={clip_plan2}')
 
 
     # ## #显存不够

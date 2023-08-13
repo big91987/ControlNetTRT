@@ -124,7 +124,9 @@ class FrozenCLIPEmbedder(AbstractEncoder):
         batch_encoding = self.tokenizer(text, truncation=True, max_length=self.max_length, return_length=True,
                                         return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
         tokens = batch_encoding["input_ids"].to(self.device)
+
         outputs = self.transformer(input_ids=tokens, output_hidden_states=self.layer=="hidden")
+        # import pdb; pdb.set_trace()
         if self.layer == "last":
             z = outputs.last_hidden_state
         elif self.layer == "pooled":

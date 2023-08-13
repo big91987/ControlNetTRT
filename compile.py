@@ -19,8 +19,8 @@ from ldm.util import log_txt_as_img, exists, instantiate_from_config
 import onnx
 import shutil
 import onnx_graphsurgeon as gs
-
 from onnxruntime.transformers.float16 import convert_float_to_float16
+from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextModel
 
 
 def onnx_export(model, model_name, inputs, input_names, output_names, dynamic_axes, out_path, convert_fp16 = True, const_folding = True, input_shapes = {}):
@@ -260,3 +260,29 @@ if __name__ == '__main__':
 
     export(model=uc1b_model, model_name='uc1b', out_path=uc1b_onnx, const_folding=True, convert_fp16=False, batch_size=1)
     compile(input_path=uc1b_onnx, out_path=uc1b_plan, model_name='uc1b', batch_size=1)
+
+
+    clip_onnx = './onnx/clip/model.onnx'
+    clip_plan = './engine/clip.engine'
+    
+    clip_model =  CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14").cuda()
+    os.makedirs(os.path.dirname(clip_onnx), exist_ok=True)
+    os.makedirs(os.path.dirname(clip_plan), exist_ok=True)
+    input_ids = torch.ones(1, 77, dtype=torch.int64).to('cuda')
+    torch.onnx.export(
+        clip_model,
+        (input_ids),
+        clip_onnx,
+        export_params=True,
+        opset_version = 18,
+        do_constant_folding = True,
+        keep_initializers_as_inputs = True,
+        input_names=['input_ids'],
+        output_names=['context', 'pooled_output'],
+        dynamic_axes={
+            'input_ids': {0:'bs'},
+            'context': {0:'bs'},
+            'pooled_output': {0:'bs'},
+        }
+    )
+    os.system(f'trtexec --onnx={clip_onnx} --saveEngine={clip_plan}')
