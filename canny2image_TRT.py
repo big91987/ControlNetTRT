@@ -20,66 +20,6 @@ from cuda import cudart
 import datetime
 
 
-
-# def make_context(engine_path, model_name, trt_logger):
-#     H = 256
-#     W = 384
-#     assert os.path.exists(engine_path)
-#     latent_height = H // 8
-#     latent_width  = W // 8
-#     latent_channel  = 4
-#     img_hegint = H
-#     img_width = W
-#     img_channel = 3
-#     embedding_dim = 768
-#     text_maxlen = 77
-#     batch_size = 1
-
-#     if model_name == 'control':
-#         input_shapes = {
-#             'x_in' : [batch_size, latent_channel, latent_height, latent_width],
-#             'h_in' : [batch_size, img_channel, img_hegint, img_width], 
-#             't_in' : [batch_size], 
-#             'c_in' : [batch_size, text_maxlen, embedding_dim],
-#         }
-
-#     elif model_name == 'unet':
-
-#         input_shapes = {
-#             'x_in' : [batch_size, latent_channel, latent_height, latent_width], 
-#             't_in' : [batch_size], 
-#             'c_in' : [batch_size, text_maxlen, embedding_dim], 
-#             'ctrl0': [batch_size, 320, latent_height, latent_width],
-#             'ctrl1': [batch_size, 320, latent_height, latent_width],
-#             'ctrl2': [batch_size, 320, latent_height, latent_width],
-#             'ctrl3': [batch_size, 320, latent_height//2, latent_width//2],
-#             'ctrl4': [batch_size, 640, latent_height//2, latent_width//2],
-#             'ctrl5': [batch_size, 640, latent_height//2, latent_width//2],
-#             'ctrl6': [batch_size, 640, latent_height//4, latent_width//4],
-#             'ctrl7': [batch_size, 1280, latent_height//4, latent_width//4],
-#             'ctrl8': [batch_size, 1280, latent_height//4, latent_width//4],
-#             'ctrl9': [batch_size, 1280, latent_height//8, latent_width//8],
-#             'ctrl10': [batch_size, 1280, latent_height//8, latent_width//8],
-#             'ctrl11': [batch_size, 1280, latent_height//8, latent_width//8],
-#             'ctrl12': [batch_size, 1280, latent_height//8, latent_width//8],
-#         }
-#     else:
-#         return None
-
-#     with open(engine_path, 'rb') as f:
-#         engine_str = f.read()
-
-#     engine = trt.Runtime(trt_logger).deserialize_cuda_engine(engine_str)
-#     context = engine.create_execution_context()
-    
-#     for i, input_name in enumerate(input_shapes.keys()):
-#         print(f'!! {model_name} setting shape {input_name} ===> f{input_shapes[input_name]}')
-#         context.set_binding_shape(i, input_shapes[input_name])
-    
-#     return context
-
-
-
 def torch_dtype_from_trt(trt_dtype):
     # Convert TensorRT dtype to PyTorch dtype
     return {
@@ -88,8 +28,6 @@ def torch_dtype_from_trt(trt_dtype):
         trt.int32:   torch.int32,
         # Add other dtype conversions as needed
     }[trt_dtype]
-
-
 
 
 def make_cuda_graph(engine_path, model_name, trt_logger):
@@ -121,27 +59,15 @@ def make_cuda_graph(engine_path, model_name, trt_logger):
     for i, i_shape in enumerate(input_shapes):
         i_dtype = torch_dtype_from_trt(input_dtypes[i])
         i_shape = tuple(i_shape)
-        # if i_dtype.is_floating_point:
-        #     i_data = torch.rand(*i_shape, dtype=i_dtype, device='cuda')
-        # else:
-        #     i_data = torch.randint(low=0, high=100, size=i_shape, dtype=i_dtype, device='cuda')
         i_data = torch.empty(size=i_shape, dtype=i_dtype, device='cuda')
-
-        print(f'!! {model_name} setting shape {input_names[i]} ===> f{i_shape}')
         context.set_binding_shape(i, i_shape)
         buffer.append(i_data)
 
     for i, o_shape in enumerate(output_shapes):
         o_dtype = torch_dtype_from_trt(output_dtypes[i])
         o_shape = tuple(o_shape)
-        # if o_dtype.is_floating_point:
-        #     o_data = torch.rand(*o_shape, dtype=o_dtype, device='cuda')
-        # else:
-        #     o_data = torch.randint(low=0, high=100, size=o_shape, dtype=o_dtype, device='cuda')
         o_data = torch.empty(size=o_shape, dtype=o_dtype, device='cuda')
         buffer.append(o_data)
-
-    # bufferD = [data.data_ptr() for data in bufferH]  # Get device pointers
 
     # # Set binding shapes
     for i, input_name in enumerate(input_names):
@@ -149,24 +75,16 @@ def make_cuda_graph(engine_path, model_name, trt_logger):
 
     for i in range(nIO):
         context.set_tensor_address(lTensorName[i], int(buffer[i].data_ptr()))
-
-    # context.execute_async_v3(stream)
     
     context.execute_async_v2([int(x.data_ptr()) for x in buffer], stream)
 
     # Capture CUDA graph
     cudart.cudaStreamBeginCapture(stream, cudart.cudaStreamCaptureMode.cudaStreamCaptureModeGlobal)
-    # context.execute_async_v3(stream)
     context.execute_async_v2([int(x.data_ptr()) for x in buffer], stream)
     _, graph = cudart.cudaStreamEndCapture(stream)
     _, graphExe = cudart.cudaGraphInstantiate(graph, 0)  # for CUDA >= 12
 
-    # # Launch the captured graph
-    # cudart.cudaGraphLaunch(graphExe, stream)
-    # cudart.cudaStreamSynchronize(stream)
-
     return buffer, graphExe, stream, context, lTensorName
-
 
 
 class hackathon():
@@ -180,80 +98,14 @@ class hackathon():
         self.trt_logger = trt.Logger(trt.Logger.WARNING)
         trt.init_libnvinfer_plugins(self.trt_logger, '')
 
-        # control_onnx = './onnx/control/model.onnx'
-        # control_plan = './engine/control.engine'
-
-
-        # clip_onnx = './onnx/clip/model.onnx'
-        # clip_plan = './engine/clip.engine'
-
-        # vae_onnx = './onnx/vae/model.onnx'
-        # vae_plan = './engine/vae.engine'
-
-        # unet_onnx = './onnx/unet/model.onnx'
-        # unet_plan = './engine/unet.engine'
-
-        # self.model.control_context = make_context(control_plan, model_name='control', trt_logger=self.trt_logger)
-
-        # self.model.unet_context = make_context(unet_plan, model_name='unet', trt_logger=self.trt_logger)
-
-
-        # self.model.control_dev_buff, self.model.control_graph_exec, self.model.control_stream, self.model.control_context, self.model.control_bnames = \
-        #     make_cuda_graph(control_plan, model_name='control', trt_logger=self.trt_logger)
-        
-        # self.model.unet_dev_buff, self.model.unet_graph_exec, self.model.unet_stream, self.model.unet_context, self.model.unet_bnames = \
-        #     make_cuda_graph(unet_plan, model_name='unet', trt_logger=self.trt_logger)
-        
-
-        # uc2b_onnx = './onnx2/unet_with_spec_control/model.onnx'
-        # uc2b_plan = './engine2/unet_with_spec_control.engine'
-        # # uc2b_plan = './engine2/uc2b_preuned.engine'
-
-
-        # self.model.uc2b_buff, self.model.uc2b_ge, self.model.uc2b_stream, self.model.uc2b_context, self.model.uc2b_bnames = \
-        # make_cuda_graph(uc2b_plan, model_name='uc2b', trt_logger=self.trt_logger)
-
-
-        # uc1b_onnx = './onnx/uc1b/model.onnx'
-        # uc1b_plan = './engine/uc1b.engine'
-        uc1b_plan = './engine/uc1b_opt5.engine'
-
+        uc1b_plan = './engine/uc1b.engine'
         self.model.uc1b_buff, self.model.uc1b_ge, self.model.uc1b_stream, self.model.uc1b_context, self.model.uc1b_bnames = \
         make_cuda_graph(uc1b_plan, model_name='uc1b', trt_logger=self.trt_logger)
 
-
-        ## 显存不够
-        # ddim_onnx = './onnx/ddim/model.onnx'
-        # ddim_plan = './engine/ddim.engine'
-
-        # self.model.ddim_dev_buff, self.model.ddim_graph_exec, self.model.ddim_stream, self.model.ddim_context, self.model.ddim_bnames = \
-        # make_cuda_graph(ddim_plan, model_name='ddim', trt_logger=self.trt_logger)
-
-
-        # vae_decoder_model = model.first_stage_model.decoder
-        # vae_decoder_onnx = './onnx/vae_decoder/model.onnx'
-        # vae_decoder_plan = './engine/vae_decoder.engine'
-        # self.model.first_stage_model.vae_decoder_buff, self.model.first_stage_model.vae_decoder_ge, \
-        #     self.model.first_stage_model.vae_decoder_stream, self.model.first_stage_model.vae_decoder_context, \
-        #         self.model.first_stage_model.vae_decoder_bnames = \
-        #             make_cuda_graph(vae_decoder_plan, model_name='vae_decoder', trt_logger=self.trt_logger)
-
-        ## TODO 补充warmup逻辑
-
-
-
-        # vd_onnx = './onnx/vd/model.onnx'
         vd_plan = './engine/vd.engine'
         self.model.vd_buff, self.model.vd_ge, self.model.vd_stream, self.model.vd_context, \
                 self.model.vd_bnames = make_cuda_graph(vd_plan, model_name='vd', trt_logger=self.trt_logger)
-
-
-        # clip_onnx = './onnx/clip/model.onnx'
-        # clip_plan = './engine/clip.engine'
-        # self.model.clip_buff, self.model.clip_ge, self.model.clip_stream, self.model.clip_context, \
-        #         self.model.clip_bnames = make_cuda_graph(clip_plan, model_name='clip', trt_logger=self.trt_logger)
-
-
+        
         print(" --------- warm up begin -----------")
         path = "./warmup/bird_0.jpg"
         img = cv2.imread(path)
@@ -274,13 +126,11 @@ class hackathon():
                 200)
         end = datetime.datetime.now().timestamp()
         print(f" --------- warm up end, dt = {(end-start)*1000} ms-----------")
-
         print("finished")
 
 
     def __del__(self):
         pass
-
 
 
     def process(self, input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, low_threshold, high_threshold):
